@@ -5,7 +5,8 @@
 # The Dart client hardcodes the program id instead of reading the IDL at
 # runtime, so a fresh deploy leaves the app deriving PDAs for a program that no
 # longer exists — which surfaces as ConstraintSeeds errors that look like a bug
-# in the seeds. Run this after every `anchor keys sync` or deploy to a new id.
+# in the seeds. Run this after every `anchor build` that regenerates the
+# keypair, and after any deploy to a new id.
 #
 #   ./scripts/sync_program_id.sh
 
@@ -32,36 +33,52 @@ program_id="$(solana address -k "$keypair")"
 echo "Program id: $program_id"
 
 # BSD and GNU sed disagree about -i, so write through a temp file instead.
+#
+# Each target is verified after rewriting rather than trusted: a pattern that
+# silently stops matching (a formatter rewrapping a line, say) would otherwise
+# leave a stale id behind and report success, which is the exact failure this
+# script exists to prevent.
 patch() {
-  local file="$1" pattern="$2" replacement="$3"
+  local label="$1" file="$2" pattern="$3" replacement="$4"
+
   if [[ ! -f "$file" ]]; then
-    echo "  skipped (missing): ${file#$root/}"
-    return
+    echo "  MISSING: ${file#"$root"/}" >&2
+    return 1
   fi
+
   local tmp
   tmp="$(mktemp)"
   sed -E "s|$pattern|$replacement|" "$file" >"$tmp"
-  if cmp -s "$file" "$tmp"; then
-    echo "  unchanged: ${file#$root/}"
-    rm -f "$tmp"
-  else
-    mv "$tmp" "$file"
-    echo "  updated:   ${file#$root/}"
+  mv "$tmp" "$file"
+
+  if ! grep -q "$program_id" "$file"; then
+    echo "  FAILED:  ${file#"$root"/} — $label pattern did not match" >&2
+    return 1
   fi
+  echo "  ok:      ${file#"$root"/}"
 }
 
-patch "$rust_program" \
+failed=0
+
+patch "declare_id!" "$rust_program" \
   'declare_id!\("[A-Za-z0-9]+"\)' \
-  "declare_id!(\"$program_id\")"
+  "declare_id!(\"$program_id\")" || failed=1
 
-# Matches the lone quoted base58 line under `programIdBase58`.
-patch "$dart_client" \
-  "^( +)'[A-Za-z0-9]{32,44}';$" \
-  "\\1'$program_id';"
+# Matched by name, not by line shape: dart format moves the string on and off
+# its own line depending on how long the id is.
+patch "programIdBase58" "$dart_client" \
+  "(programIdBase58 =[[:space:]]*)'[A-Za-z0-9]{32,44}'" \
+  "\\1'$program_id'" || failed=1
 
-patch "$anchor_toml" \
+patch "programs table" "$anchor_toml" \
   'escrow_pay = "[A-Za-z0-9]+"' \
-  "escrow_pay = \"$program_id\""
+  "escrow_pay = \"$program_id\"" || failed=1
+
+if (( failed )); then
+  echo >&2
+  echo "Program id was NOT fully synced. Fix the patterns above before building." >&2
+  exit 1
+fi
 
 echo
 echo "Now rebuild so the binary carries the id:  (cd program && anchor build)"

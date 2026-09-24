@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-escrow_pay = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+escrow_pay = "5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC"
 
 [programs.devnet]
-escrow_pay = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+escrow_pay = "5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC"
 
 [registry]
 url = "https://api.apr.dev"

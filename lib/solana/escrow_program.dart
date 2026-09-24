@@ -14,7 +14,7 @@ import 'package:solana_kit/solana_kit.dart';
 abstract final class EscrowProgram {
   /// Must match `declare_id!` in the program. Kept on its own line so
   /// `scripts/sync_program_id.sh` can rewrite it after a deploy.
-  static const programIdBase58 = 'Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS';
+  static const programIdBase58 = '5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC';
 
   static const programId = Address(programIdBase58);
 

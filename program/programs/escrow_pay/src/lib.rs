@@ -18,7 +18,7 @@ pub mod state;
 use errors::EscrowError;
 use state::{EscrowAccount, EscrowState};
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC");
 
 #[program]
 pub mod escrow_pay {
