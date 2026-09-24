@@ -4,9 +4,6 @@
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-*.iml
-.idea/
-.vscode/
 **/generated_plugin_registrant.dart
 pubspec.lock
 
@@ -25,10 +22,16 @@ program/.anchor/
 program/node_modules/
 program/test-ledger/
 
-# Keys — never commit
+# Keys — never commit. The program keypair under target/deploy is the one
+# exception: losing it means losing the ability to upgrade the deployed
+# program, but target/ is ignored above, so back it up out of band.
 *.pem
 **/keypairs/
-!program/target/deploy/*-keypair.json
+
+# Editors
+.idea/
+.vscode/
+*.iml
 
 # macOS
 .DS_Store
