@@ -126,22 +126,25 @@ class EscrowController extends Notifier<EscrowView> {
     final offer = state.offer;
     if (offer == null || state.busy) return;
 
-    await _run(() async {
-      final session = await _requireWallet();
-      if (session == null) return null;
+    await _run(
+      target: EscrowState.funded,
+      action: () async {
+        final session = await _requireWallet();
+        if (session == null) return null;
 
-      final submission = await _repo.openAndFund(
-        session: session,
-        offer: offer,
-      );
-      state = state.copyWith(address: submission.escrow);
+        final submission = await _repo.openAndFund(
+          session: session,
+          offer: offer,
+        );
+        state = state.copyWith(address: submission.escrow);
 
-      final settled = await _repo.awaitState(
-        submission.escrow,
-        target: EscrowState.funded,
-      );
-      return (settled, submission.signature);
-    });
+        final settled = await _repo.awaitState(
+          submission.escrow,
+          target: EscrowState.funded,
+        );
+        return (settled, submission.signature);
+      },
+    );
   }
 
   /// Releases the escrow to the seller.
@@ -182,17 +185,20 @@ class EscrowController extends Notifier<EscrowView> {
     final escrow = state.escrow;
     if (escrow == null || state.busy) return;
 
-    await _run(() async {
-      final session = await _requireWallet();
-      if (session == null) return null;
+    await _run(
+      target: target,
+      action: () async {
+        final session = await _requireWallet();
+        if (session == null) return null;
 
-      final signature = await action(session, escrow);
-      final settled = await _repo.awaitState(
-        Address(escrow.address),
-        target: target,
-      );
-      return (settled, signature);
-    });
+        final signature = await action(session, escrow);
+        final settled = await _repo.awaitState(
+          Address(escrow.address),
+          target: target,
+        );
+        return (settled, signature);
+      },
+    );
   }
 
   Future<WalletSession?> _requireWallet() async {
@@ -208,18 +214,38 @@ class EscrowController extends Notifier<EscrowView> {
   }
 
   /// Shared busy/error/confirm bookkeeping for the three mutating actions.
-  Future<void> _run(Future<(Escrow?, String)?> Function() action) async {
+  ///
+  /// [target] is the state the chain is expected to land in. The confirmation
+  /// token only fires when it actually got there: `awaitState` gives up after
+  /// its timeout and returns whatever it last read, so firing unconditionally
+  /// would play the burst and the haptic for a transaction that is still in
+  /// flight — or that failed.
+  Future<void> _run({
+    required EscrowState target,
+    required Future<(Escrow?, String)?> Function() action,
+  }) async {
     state = state.copyWith(busy: true, clearError: true);
     try {
       final result = await action();
-      if (result == null) return;
+      if (result == null) {
+        // The wallet step bailed out and has already set its own message.
+        state = state.copyWith(busy: false);
+        return;
+      }
 
       final (escrow, signature) = result;
+      final confirmed = escrow?.state == target;
+
       state = state.copyWith(
         escrow: escrow,
         busy: false,
         lastSignature: signature,
-        confirmToken: DateTime.now().microsecondsSinceEpoch,
+        confirmToken: confirmed ? DateTime.now().microsecondsSinceEpoch : null,
+        error: confirmed
+            ? null
+            : 'Submitted, but the cluster has not confirmed it yet. Pull down '
+                  'to refresh.',
+        clearError: confirmed,
       );
     } on Object catch (error) {
       state = state.copyWith(busy: false, error: _readable(error));
