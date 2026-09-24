@@ -97,7 +97,7 @@ anchor build                    # generates the program keypair on first run
 cd .. && ./scripts/sync_program_id.sh
 cd program && anchor build      # rebuild so the binary carries the synced id
 
-anchor test                     # tests/escrow_pay.ts against a local validator
+anchor test --validator legacy  # tests/escrow_pay.ts on a local validator
 anchor deploy --provider.cluster devnet
 ```
 
@@ -139,9 +139,20 @@ shows a fallback message rather than pretending to connect.
 - Anchor discriminators, pinned to the bytes Anchor itself emits
 - PDA derivation, including that swapping buyer and seller changes the address
 
-`anchor test` covers the chain: every state transition, and the ways each one
-can be abused — the seller releasing to themselves, a payout redirected to a
-third wallet, double release, refund after release.
+`anchor test --validator legacy` covers the chain: every state transition, and
+the ways each one can be abused — the seller releasing to themselves, a payout
+redirected to a third wallet, double release, refund after release. 14 tests,
+about 18 seconds.
+
+The `--validator legacy` flag matters. Anchor 1.2 defaults to `surfpool` for
+localnet, which is a separate install; `legacy` uses the `solana-test-validator`
+that ships with the Solana CLI. Set `ANCHOR_TEST_VALIDATOR=legacy` to avoid
+typing it.
+
+`Anchor.toml` points `[provider]` at localnet on purpose. `anchor test` deploys
+to whatever that says, so pointing it at devnet makes every test run depend on a
+funded devnet wallet and the public faucet — which is rate limited. Deploy to
+devnet explicitly with the flag above.
 
 ## Not yet done
 

@@ -11,11 +11,12 @@ escrow_pay = "5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC"
 [programs.devnet]
 escrow_pay = "5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC"
 
-[registry]
-url = "https://api.apr.dev"
-
+# Localnet, deliberately. `anchor test` deploys to whatever this says, so
+# pointing it at devnet makes every test run depend on a funded devnet wallet
+# and the public faucet. Deploy to devnet explicitly instead:
+#   anchor deploy --provider.cluster devnet
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
