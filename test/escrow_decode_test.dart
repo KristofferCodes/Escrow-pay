@@ -49,6 +49,12 @@ void main() {
     encodeAddress: hexAddress,
   );
 
+  test('agrees with the program on the EscrowAccount size', () {
+    // The Rust side pins the same number in `EscrowAccount::LEN`. If these two
+    // ever disagree, every offset below is reading the wrong bytes.
+    expect(Escrow.encodedLength, 98);
+  });
+
   test('decodes every field at the right offset', () {
     final escrow = decode(
       encodeAccount(

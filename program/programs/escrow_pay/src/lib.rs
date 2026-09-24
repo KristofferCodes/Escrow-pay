@@ -173,7 +173,7 @@ pub struct InitializeEscrow<'info> {
     #[account(
         init,
         payer = buyer,
-        space = 8 + EscrowAccount::INIT_SPACE,
+        space = EscrowAccount::LEN,
         seeds = [
             EscrowAccount::SEED_PREFIX,
             seller.key().as_ref(),
