@@ -18,3 +18,11 @@ idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 anchor-lang = "1.2.0"
+
+# Anchor's derive and attribute macros expand to `cfg(feature = "...")` checks
+# for features that live in anchor-lang, not here. Rust reports each as an
+# unexpected cfg, which buries genuine warnings. Accept exactly these four.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = [
+    'cfg(feature, values("anchor-debug", "solana", "custom-panic", "custom-heap"))',
+] }

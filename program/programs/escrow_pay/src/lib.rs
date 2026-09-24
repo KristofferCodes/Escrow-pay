@@ -77,8 +77,9 @@ pub mod escrow_pay {
         // The buyer is a plain system account, so the System Program moves the
         // lamports. Paying out later cannot use this path — see `pay_out`.
         transfer(
+            // Anchor 1.x takes the program id here, not its AccountInfo.
             CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.system_program.key(),
                 Transfer {
                     from: ctx.accounts.buyer.to_account_info(),
                     to: ctx.accounts.escrow.to_account_info(),
