@@ -93,17 +93,30 @@ npx solana-mobile@latest doctor
 
 ```bash
 cd program
-anchor build
-anchor keys sync          # writes the real program id into lib.rs + Anchor.toml
-anchor build              # rebuild so the binary carries the synced id
-anchor test               # runs tests/escrow_pay.ts against a local validator
+anchor build                    # generates the program keypair on first run
+cd .. && ./scripts/sync_program_id.sh
+cd program && anchor build      # rebuild so the binary carries the synced id
+
+anchor test                     # tests/escrow_pay.ts against a local validator
 anchor deploy --provider.cluster devnet
 ```
 
-After deploying, copy the program id into
-[`lib/solana/escrow_program.dart`](lib/solana/escrow_program.dart) — the client
-hardcodes it rather than reading the IDL at runtime, so the two have to be
-updated together.
+[`scripts/sync_program_id.sh`](scripts/sync_program_id.sh) writes the program
+id into all three places that need it: `declare_id!`, `Anchor.toml`, and
+[`lib/solana/escrow_program.dart`](lib/solana/escrow_program.dart). The Dart
+client hardcodes the id rather than reading the IDL at runtime, so a deploy to
+a new id without running this leaves the app deriving PDAs for a program that
+no longer exists — which surfaces as `ConstraintSeeds` errors that look like a
+bug in the seeds.
+
+Run it after every `anchor build` that regenerates the keypair, and after any
+deploy to a new id.
+
+Rust-side checks need no validator:
+
+```bash
+cd program && cargo test --lib   # pins the 98-byte EscrowAccount layout
+```
 
 ### App
 
