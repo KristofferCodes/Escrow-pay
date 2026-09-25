@@ -124,9 +124,13 @@ class WalletService {
 
   Future<T> _guard<T>(Future<T> Function() action) async {
     if (!isSupported) {
+      // Reached on iOS, where the MWA plugin is a deliberate no-op. Say why
+      // rather than offering Android advice the user cannot act on: there is
+      // no iOS wallet to install that would make this work.
       throw const WalletCancelled(
-        'Mobile Wallet Adapter needs Android. Install a wallet such as '
-        'Solflare or Phantom and run this on a device or emulator.',
+        'Wallet signing is Android-only. Mobile Wallet Adapter has no iOS '
+        'equivalent, so this build can show the app but cannot connect a '
+        'wallet or move funds.',
       );
     }
     try {

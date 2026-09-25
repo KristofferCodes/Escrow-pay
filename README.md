@@ -126,8 +126,30 @@ flutter test              # pure logic: money, QR codec, account decoding, PDAs
 flutter run               # Android device or Solana Mobile emulator
 ```
 
-Mobile Wallet Adapter is Android-only. On iOS the plugin is a no-op and the app
-shows a fallback message rather than pretending to connect.
+### Platform support
+
+**Android is the only platform where this app actually works.** Mobile Wallet
+Adapter has no iOS equivalent — the plugin compiles on iOS and then does
+nothing — and the Solana dApp Store is Android-only, so Android is also the
+only place the app can ship.
+
+An `ios/` target exists anyway, because the UI is worth iterating on in the
+simulator:
+
+| | Android | iOS |
+| --- | --- | --- |
+| Screens, motion, theming | works | works |
+| QR generation (`qr_flutter`) | works | works |
+| QR scanning (`mobile_scanner`) | works | works |
+| Connect wallet | works | **no-op** |
+| Fund / release / refund | works | **no-op** |
+
+On iOS every wallet call is refused up front by `assertMwaSupported()` and the
+app says why, rather than hanging on a connection that will never arrive. That
+means no funding, no release and no refund — the entire escrow flow. Treat the
+iOS build as a design surface, not a testable app.
+
+Do the happy-path testing on an Android device or the Solana Mobile emulator.
 
 ## Testing
 
