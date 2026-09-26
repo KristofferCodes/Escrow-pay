@@ -151,6 +151,83 @@ iOS build as a design surface, not a testable app.
 
 Do the happy-path testing on an Android device or the Solana Mobile emulator.
 
+## Testing the escrow flow
+
+**One Android device is enough.** The seller side never signs anything — it
+reads a wallet address, puts it in a QR code and stops. Only the buyer
+transacts. So the "seller" can be a throwaway keypair and a QR on your laptop
+screen.
+
+The program does reject `seller == buyer` (`SameParty`), so the two addresses
+have to differ.
+
+### 1. A seller to pay
+
+```bash
+solana-keygen new --no-bip39-passphrase --silent --outfile .seller-test.json
+solana address -k .seller-test.json
+```
+
+Nothing is deployed for this key and it holds nothing — it is just somewhere
+for the escrow to pay, and something whose balance you can watch.
+
+### 2. Put the offer on screen
+
+```bash
+dart run tool/make_test_offer.dart <seller-address> 0.05 "Pixel 8 Pro"
+open build/test-offer.html
+```
+
+The QR is built with the app's own `EscrowOffer.encode`, so it cannot drift
+from what the scanner accepts.
+
+### 3. Fund the buyer
+
+Connect the wallet on the device, then airdrop to the address it shows. The
+public faucet rate limits by IP; [faucet.solana.com](https://faucet.solana.com)
+is the fallback.
+
+```bash
+solana airdrop 1 <buyer-address> --url devnet
+```
+
+### 4. Run the app and walk the flow
+
+```bash
+flutter run          # device connected over USB with debugging on
+```
+
+Scan → confirm the amount → **Fund the escrow** → approve in the wallet. The
+ring moves to Funded. Then **Confirm receipt & release**, and it settles.
+
+### 5. Check the chain agrees
+
+```bash
+solana balance $(solana address -k .seller-test.json) --url devnet
+```
+
+The seller should be up by exactly the escrowed amount. The escrow PDA keeps
+its rent, so the settled record stays readable — tap the escrow address in the
+app to copy it and open it in the explorer.
+
+Re-run from step 2 for the refund path: fund, then **Something is wrong —
+refund me** instead, and confirm the buyer is made whole less fees.
+
+### On emulators
+
+An emulator works, with two wrinkles. Its camera is virtual, so feed it the QR
+directly:
+
+```bash
+emulator -avd <name> -camera-back imagefile:/absolute/path/to/qr.png
+```
+
+And Solana Mobile's Mock MWA Wallet "does not store a persistent keypair and
+the wallet is reset each time the app is exited" — fine for one pass, painful
+for repeats, since the buyer address changes and needs a fresh airdrop every
+time. Installing Solflare on the emulator avoids that. A physical device avoids
+both wrinkles and is what the demo gets recorded on anyway.
+
 ## Testing
 
 `flutter test` covers everything that does not need a chain:

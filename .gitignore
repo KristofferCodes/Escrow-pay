@@ -47,3 +47,4 @@ ios/Runner.xcworkspace/xcuserdata/
 ios/Runner.xcodeproj/xcuserdata/
 ios/Podfile.lock
 *.ipa
+.seller-test.json
