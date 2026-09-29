@@ -151,6 +151,75 @@ iOS build as a design surface, not a testable app.
 
 Do the happy-path testing on an Android device or the Solana Mobile emulator.
 
+## Distributing a build
+
+The app is Android-only, so distribution means an APK.
+
+A universal release APK is ~69 MB because it carries three CPU architectures,
+one of which (`x86_64`) only ever runs on emulators. Split it and send the
+`arm64-v8a` one — ~25 MB, and it covers every Android phone of the last
+several years:
+
+```bash
+flutter build apk --release --split-per-abi
+# build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+```
+
+Firebase App Distribution needs no code change and no Firebase SDK — only an
+App ID from registering the Android package in the console:
+
+```bash
+firebase login
+firebase appdistribution:distribute \
+  build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+  --app <FIREBASE_APP_ID> \
+  --testers "someone@example.com" \
+  --release-notes "Escrow Pay — devnet"
+```
+
+For one or two testers, sending the APK directly works just as well.
+
+### What a tester needs
+
+Without all four, the app fails in ways that look like bugs:
+
+1. An Android phone, API 23 or newer.
+2. A wallet app — Solflare or Phantom.
+3. **That wallet switched to devnet.** Both default to mainnet. This is the
+   one people miss.
+4. A little devnet SOL in it. The buyer funds the escrow, so the tester pays.
+
+They also need the program deployed to devnet, and the seller QR — generate
+one with `tool/make_test_offer.dart` and send them the HTML file or a
+screenshot.
+
+### Release signing
+
+Flutter's scaffold signs release builds with the **debug** key. Firebase
+accepts that, but it is not acceptable for the dApp Store, and a debug-signed
+build cannot be upgraded over by a properly signed one — testers would have to
+uninstall first. Worth doing before handing builds around.
+
+```bash
+keytool -genkey -v -keystore ~/escrow-pay-release.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias escrow-pay
+```
+
+Then write `android/key.properties` (gitignored — never commit it):
+
+```properties
+storePassword=<the password you chose>
+keyPassword=<the password you chose>
+keyAlias=escrow-pay
+storeFile=/Users/you/escrow-pay-release.jks
+```
+
+The Gradle config picks it up automatically and falls back to the debug key
+when the file is absent, so a fresh clone still builds.
+
+**Back up the keystore.** Losing it means losing the ability to ship an update
+to anyone who installed a build signed with it.
+
 ## Testing the escrow flow
 
 **One Android device is enough.** The seller side never signs anything — it

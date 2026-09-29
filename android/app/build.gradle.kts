@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Release signing is configured out of band: android/key.properties holds the
+// keystore path and passwords and is gitignored, so no secret lands in the
+// repo. When the file is absent — a fresh clone, or CI that only builds debug
+// — the release build falls back to the debug key rather than failing, which
+// keeps `flutter run --release` working for anyone.
+//
+// See README "Release signing" for generating the keystore.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
 
 android {
     namespace = "com.speaktechnology.escrow_pay"
@@ -24,11 +39,28 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                // Debug key. Fine for local runs, NOT acceptable for the dApp
+                // Store, and note that a build signed this way cannot be
+                // upgraded over by a properly signed one — testers would have
+                // to uninstall first.
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
