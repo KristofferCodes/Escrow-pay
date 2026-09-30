@@ -8,6 +8,7 @@ import '../core/escrow.dart';
 import '../core/qr_payload.dart';
 import 'cluster.dart';
 import 'escrow_program.dart';
+import 'rpc_retry_client.dart';
 import 'wallet.dart';
 
 /// Reads escrow state from the cluster and turns user intents into signed,
@@ -25,7 +26,13 @@ class EscrowRepository {
 
   /// Typed via inference: the concrete `Rpc` class lives in
   /// `solana_kit_rpc_spec`, which the umbrella package does not re-export.
-  late final _rpc = createSolanaRpc(url: cluster.rpcUrl);
+  ///
+  /// Every call goes through [RpcRetryClient], so a throttled endpoint costs a
+  /// few hundred milliseconds rather than surfacing as a failed escrow.
+  late final _rpc = createSolanaRpc(
+    url: cluster.rpcUrl,
+    client: RpcRetryClient(),
+  );
 
   Future<ProgramDerivedAddress> derive({
     required Address seller,

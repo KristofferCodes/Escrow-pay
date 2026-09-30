@@ -21,8 +21,69 @@ function loadKeypair(path) {
   return Keypair.fromSecretKey(Uint8Array.from(secret));
 }
 
+/// Prefers the endpoint the app itself is built with, so the smoke test
+/// exercises the same RPC the APK will use. config/local.json is gitignored.
+function configuredRpcUrl() {
+  if (process.env.ANCHOR_PROVIDER_URL) return process.env.ANCHOR_PROVIDER_URL;
+  try {
+    const cfg = JSON.parse(
+      fs.readFileSync(`${__dirname}/../../config/local.json`, "utf8")
+    );
+    if (cfg.DEVNET_RPC_URL) return cfg.DEVNET_RPC_URL;
+  } catch {
+    // No local config — fall through to the public endpoint.
+  }
+  return "https://api.devnet.solana.com";
+}
+
+/// Never print the key itself.
+function redact(url) {
+  return url.replace(/\/v2\/[^/?]+/, "/v2/***");
+}
+
+/// Sends and confirms without a websocket.
+///
+/// Anchor's `.rpc()` confirms via `signatureSubscribe`, and not every provider
+/// serves that on its Solana websocket — Alchemy answered
+/// "Method 'signatureSubscribe' not found" while its HTTP endpoint worked
+/// perfectly. Polling `getSignatureStatuses` keeps this script working against
+/// any endpoint the app itself can talk to.
+async function sendAndConfirm(provider, tx, signers = []) {
+  const connection = provider.connection;
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
+  tx.recentBlockhash = blockhash;
+  tx.lastValidBlockHeight = lastValidBlockHeight;
+  tx.feePayer = provider.wallet.publicKey;
+
+  const signed = await provider.wallet.signTransaction(tx);
+  for (const signer of signers) signed.partialSign(signer);
+
+  const signature = await connection.sendRawTransaction(signed.serialize(), {
+    preflightCommitment: "confirmed",
+  });
+
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const { value } = await connection.getSignatureStatuses([signature]);
+    const status = value[0];
+    if (status?.err) {
+      throw new Error(`transaction failed: ${JSON.stringify(status.err)}`);
+    }
+    if (
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
+      return signature;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`not confirmed within 60s: ${signature}`);
+}
+
 (async () => {
-  process.env.ANCHOR_PROVIDER_URL ||= "https://api.devnet.solana.com";
+  process.env.ANCHOR_PROVIDER_URL = configuredRpcUrl();
   process.env.ANCHOR_WALLET ||= `${os.homedir()}/.config/solana/id.json`;
 
   const provider = anchor.AnchorProvider.env();
@@ -36,6 +97,7 @@ function loadKeypair(path) {
   const seller = Keypair.generate();
   const nonce = new anchor.BN(Date.now());
 
+  console.log("rpc     :", redact(process.env.ANCHOR_PROVIDER_URL));
   console.log("program :", program.programId.toBase58());
   console.log("buyer   :", buyer.publicKey.toBase58());
   console.log("seller  :", seller.publicKey.toBase58(), "(fresh, 0 SOL)");
@@ -54,7 +116,7 @@ function loadKeypair(path) {
   console.log("escrow  :", escrow.toBase58(), "\n");
 
   // 1. open + fund, in one transaction, the way the app does it.
-  const sigFund = await program.methods
+  const fundTx = await program.methods
     .initializeEscrow(nonce, new anchor.BN(AMOUNT))
     .accounts({
       escrow,
@@ -72,7 +134,8 @@ function loadKeypair(path) {
         })
         .instruction(),
     ])
-    .rpc();
+    .transaction();
+  const sigFund = await sendAndConfirm(provider, fundTx);
 
   let account = await program.account.escrowAccount.fetch(escrow);
   console.log("fund    :", Object.keys(account.state)[0], "|", sigFund);
@@ -80,10 +143,11 @@ function loadKeypair(path) {
 
   // 2. release to the seller.
   const before = await connection.getBalance(seller.publicKey);
-  const sigRelease = await program.methods
+  const releaseTx = await program.methods
     .confirmReceipt()
     .accounts({ escrow, buyer: buyer.publicKey, seller: seller.publicKey })
-    .rpc();
+    .transaction();
+  const sigRelease = await sendAndConfirm(provider, releaseTx);
 
   account = await program.account.escrowAccount.fetch(escrow);
   const after = await connection.getBalance(seller.publicKey);

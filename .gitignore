@@ -22,6 +22,10 @@ program/.anchor/
 program/node_modules/
 program/test-ledger/
 
+# RPC endpoints with API keys in them. Only the example is tracked.
+config/local.json
+.env
+
 # Keys — never commit. The program keypair under target/deploy is the one
 # exception: losing it means losing the ability to upgrade the deployed
 # program, but target/ is ignored above, so back it up out of band.

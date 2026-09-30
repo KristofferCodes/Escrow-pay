@@ -32,6 +32,8 @@ dependencies:
   crypto: ^3.0.6
   convert: ^3.1.2
   http: ^1.5.0
+  # Retry-After can be an HTTP date; http does not export a parser for it.
+  http_parser: ^4.1.2
 
 dev_dependencies:
   flutter_test:

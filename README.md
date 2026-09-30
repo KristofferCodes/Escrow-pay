@@ -138,12 +138,38 @@ Rust-side checks need no validator:
 cd program && cargo test --lib   # pins the 98-byte EscrowAccount layout
 ```
 
+### RPC endpoint
+
+The public `api.devnet.solana.com` is correct but heavily rate limited — it
+answers 429 under load, and it is what made the first deploy fail. Point the
+app at a private endpoint instead:
+
+```bash
+cp config/local.example.json config/local.json   # then fill in your key
+flutter run --dart-define-from-file=config/local.json
+```
+
+`config/local.json` is gitignored. `Cluster.rpcUrl` reads `DEVNET_RPC_URL` /
+`MAINNET_RPC_URL` via `String.fromEnvironment` and falls back to the public
+endpoint when unset, so a fresh clone still builds and runs.
+
+> **A key compiled into an APK is not secret.** Anyone who installs the app
+> can extract it — `strings libapp.so` is enough. Rate-limit the key at the
+> provider and restrict it if they support it; do not reuse a key that has
+> spending authority or a paid quota you care about.
+
+RPC calls go through `RpcRetryClient`, which retries 429 and the 5xx codes
+that mean the node could not answer, with exponential backoff, jitter and
+`Retry-After` support. It never retries a rejected request (400/401/403/404) —
+retrying those just multiplies the failure. This is safe because the app only
+*reads* over RPC; transactions are submitted by the wallet over MWA.
+
 ### App
 
 ```bash
 flutter pub get
 flutter test              # pure logic: money, QR codec, account decoding, PDAs
-flutter run               # Android device or Solana Mobile emulator
+flutter run --dart-define-from-file=config/local.json
 ```
 
 ### Platform support
@@ -181,8 +207,17 @@ one of which (`x86_64`) only ever runs on emulators. Split it and send the
 several years:
 
 ```bash
-flutter build apk --release --split-per-abi
+flutter build apk --release --split-per-abi \
+  --dart-define-from-file=config/local.json
 # build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+```
+
+Forgetting `--dart-define-from-file` silently produces a build pointed at the
+public endpoint. Check before shipping one:
+
+```bash
+unzip -p app-arm64-v8a-release.apk lib/arm64-v8a/libapp.so \
+  | strings -a | grep -c alchemy      # 1 = the private endpoint is compiled in
 ```
 
 Firebase App Distribution needs no code change and no Firebase SDK — only an
