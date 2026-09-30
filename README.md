@@ -89,6 +89,8 @@ device or emulator with a wallet app installed.
 npx solana-mobile@latest doctor
 ```
 
+Deployed on devnet at `5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC`.
+
 ### Program
 
 ```bash
@@ -100,6 +102,24 @@ cd program && anchor build      # rebuild so the binary carries the synced id
 anchor test --validator legacy  # tests/escrow_pay.ts on a local validator
 anchor deploy --provider.cluster devnet
 ```
+
+If the deploy fails with `Max retries exceeded`, that is the public devnet RPC
+dropping write transactions, not a problem with the program. `solana program
+deploy` sends them to validator TPUs by default; route them through the RPC
+instead and resume the partial buffer it left behind:
+
+```bash
+solana program deploy target/deploy/escrow_pay.so \
+  --program-id target/deploy/escrow_pay-keypair.json \
+  --buffer target/deploy/escrow_pay-upgrade-buffer.json \
+  --url devnet --use-rpc --max-sign-attempts 200 --with-compute-unit-price 5000
+```
+
+A 152 KB program is a few hundred write transactions. Avoid polling the same
+RPC for status while it runs — that competes for the same rate limit.
+
+Check nothing was stranded afterwards, since an abandoned buffer holds its
+rent: `solana program show --buffers --url devnet`.
 
 [`scripts/sync_program_id.sh`](scripts/sync_program_id.sh) writes the program
 id into all three places that need it: `declare_id!`, `Anchor.toml`, and
@@ -306,6 +326,13 @@ both wrinkles and is what the demo gets recorded on anyway.
 - `EscrowAccount` byte layout, field by field
 - Anchor discriminators, pinned to the bytes Anchor itself emits
 - PDA derivation, including that swapping buyer and seller changes the address
+
+`node program/scripts/devnet-smoke.js` proves the **deployed** program works,
+not just a local build of it: it opens, funds and releases a real escrow on
+devnet using the same PDA seeds and instruction layout the Flutter client
+builds by hand, and asserts the seller received exactly the escrowed amount.
+Run it after every deploy — a mismatch between the app and the live program
+surfaces here instead of in someone's hands.
 
 `anchor test --validator legacy` covers the chain: every state transition, and
 the ways each one can be abused — the seller releasing to themselves, a payout
