@@ -34,6 +34,14 @@ class EscrowRepository {
     client: RpcRetryClient(),
   );
 
+  /// `getProgramAccounts` is expensive to serve and several providers gate it
+  /// — Alchemy's free tier refuses it outright — so history falls back to the
+  /// public endpoint, which does serve it. Only built when there is a custom
+  /// endpoint that might refuse.
+  late final _fallbackRpc = cluster.usesCustomRpc
+      ? createSolanaRpc(url: cluster.defaultRpcUrl, client: RpcRetryClient())
+      : null;
+
   Future<ProgramDerivedAddress> derive({
     required Address seller,
     required Address buyer,
@@ -141,6 +149,95 @@ class EscrowRepository {
     ),
   );
 
+  /// Every escrow this wallet is party to, newest first.
+  ///
+  /// Read straight off the chain rather than from local storage, so history
+  /// follows the wallet to a new device and cannot drift from what actually
+  /// happened. Two queries — one where the wallet is the buyer, one where it
+  /// is the seller — because `memcmp` cannot express "or".
+  Future<List<Escrow>> history(Address wallet) async {
+    final results = await Future.wait([
+      _accountsWhere(offset: _buyerOffset, equals: wallet),
+      _accountsWhere(offset: _sellerOffset, equals: wallet),
+    ]);
+
+    // A wallet can be both parties only in a malformed escrow, but dedupe
+    // anyway so the list never shows the same PDA twice.
+    final byAddress = <String, Escrow>{};
+    for (final escrow in results.expand((list) => list)) {
+      byAddress[escrow.address] = escrow;
+    }
+
+    final all = byAddress.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return all;
+  }
+
+  /// Field offsets inside `EscrowAccount`, after the 8-byte discriminator.
+  /// Mirrors the layout in `Escrow.decode` and `EscrowAccount::BODY_LEN`.
+  static const _sellerOffset = 8;
+  static const _buyerOffset = 8 + 32;
+
+  Future<List<Escrow>> _accountsWhere({
+    required int offset,
+    required Address equals,
+  }) async {
+    final params = <Object?>[
+      EscrowProgram.programId.value,
+      {
+        'encoding': 'base64',
+        'filters': [
+          // Cheap pre-filter: anything of a different size is not ours.
+          {'dataSize': Escrow.encodedLength},
+          {
+            'memcmp': {'offset': offset, 'bytes': equals.value},
+          },
+        ],
+      },
+    ];
+
+    List<Object?> response;
+    try {
+      response = await _rpc
+          .request<List<Object?>>('getProgramAccounts', params)
+          .send();
+    } on Object catch (error) {
+      final fallback = _fallbackRpc;
+      if (fallback == null || !_isMethodUnavailable(error)) rethrow;
+
+      response = await fallback
+          .request<List<Object?>>('getProgramAccounts', params)
+          .send();
+    }
+
+    final escrows = <Escrow>[];
+    for (final entry in response) {
+      if (entry is! Map) continue;
+
+      final address = entry['pubkey'];
+      final account = entry['account'];
+      if (address is! String || account is! Map) continue;
+
+      final data = account['data'];
+      if (data is! List || data.isEmpty) continue;
+
+      final Uint8List bytes;
+      try {
+        bytes = base64Decode(data.first! as String);
+      } on FormatException {
+        continue;
+      }
+
+      final escrow = Escrow.decode(
+        address: address,
+        data: bytes,
+        encodeAddress: (key) => getAddressFromPublicKey(key).value,
+      );
+      if (escrow != null) escrows.add(escrow);
+    }
+    return escrows;
+  }
+
   /// Polls until the escrow reaches [target], or gives up.
   ///
   /// `signAndSendTransactions` returns once the wallet has submitted, which is
@@ -161,6 +258,17 @@ class EscrowRepository {
       await Future<void>.delayed(interval);
     }
     return last;
+  }
+
+  /// Distinguishes "this provider will not serve the method" from a genuine
+  /// failure. Only the former is worth retrying somewhere else.
+  static bool _isMethodUnavailable(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('not available') ||
+        text.contains('not supported') ||
+        text.contains('unsupported') ||
+        text.contains('method not found') ||
+        text.contains('disabled');
   }
 
   Future<String> _compile({

@@ -234,6 +234,13 @@ firebase appdistribution:distribute \
 
 For one or two testers, sending the APK directly works just as well.
 
+### Known build constraint
+
+`permission_handler` is pinned to 12.x. Its 14.x Android package requires
+`compileSdk 37`, which Android Gradle Plugin 9.0.1 does not support — it caps
+at 36, and the build fails at `checkReleaseAarMetadata`. Unpin once AGP
+supports 37.
+
 ### What a tester needs
 
 Without all four, the app fails in ways that look like bugs:

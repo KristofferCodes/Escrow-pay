@@ -19,11 +19,20 @@ final escrowRepositoryProvider = Provider<EscrowRepository>(
 
 /// Whether a wallet is attached, and anything that went wrong attaching one.
 class WalletState {
-  const WalletState({this.session, this.connecting = false, this.error});
+  const WalletState({
+    this.session,
+    this.connecting = false,
+    this.error,
+    this.noWalletInstalled = false,
+  });
 
   final WalletSession? session;
   final bool connecting;
   final String? error;
+
+  /// Set when the last attempt failed because the device has no wallet app.
+  /// The UI offers to install one rather than a retry that cannot work.
+  final bool noWalletInstalled;
 
   bool get isConnected => session != null;
 
@@ -31,12 +40,16 @@ class WalletState {
     WalletSession? session,
     bool? connecting,
     String? error,
+    bool? noWalletInstalled,
     bool clearError = false,
     bool clearSession = false,
   }) => WalletState(
     session: clearSession ? null : (session ?? this.session),
     connecting: connecting ?? this.connecting,
     error: clearError ? null : (error ?? this.error),
+    noWalletInstalled: clearError
+        ? false
+        : (noWalletInstalled ?? this.noWalletInstalled),
   );
 }
 
@@ -63,7 +76,11 @@ class WalletController extends Notifier<WalletState> {
       state = WalletState(session: session);
       return session;
     } on WalletCancelled catch (error) {
-      state = state.copyWith(connecting: false, error: error.message);
+      state = state.copyWith(
+        connecting: false,
+        error: error.message,
+        noWalletInstalled: error.noWalletInstalled,
+      );
       return null;
     }
   }

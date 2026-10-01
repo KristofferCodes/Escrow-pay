@@ -28,6 +28,17 @@ dependencies:
   flutter_animate: ^4.5.2
   google_fonts: ^8.2.1
 
+  # Platform
+  # Camera permission can be requested and re-requested in-app rather than
+  # sending the user to system settings.
+  #
+  # Pinned to 12.x: permission_handler_android 14.x requires compileSdk 37,
+  # which Android Gradle Plugin 9.0.1 does not support (it caps at 36). Revisit
+  # when AGP catches up.
+  permission_handler: ^12.0.3
+  # Opens the Play Store when no wallet app is installed.
+  url_launcher: ^6.3.2
+
   # Utilities
   crypto: ^3.0.6
   convert: ^3.1.2

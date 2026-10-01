@@ -22,10 +22,17 @@ class WalletSession {
   final String? label;
 }
 
-/// Raised when the user dismisses the wallet, or no wallet is installed.
+/// Raised when the user dismisses the wallet, or the handoff fails.
 class WalletCancelled implements Exception {
-  const WalletCancelled(this.message);
+  const WalletCancelled(this.message, {this.noWalletInstalled = false});
+
   final String message;
+
+  /// True when nothing on the device can answer a Mobile Wallet Adapter
+  /// intent. The only useful response is to install a wallet, so the UI
+  /// offers that instead of a retry that cannot succeed.
+  final bool noWalletInstalled;
+
   @override
   String toString() => message;
 }
@@ -138,15 +145,30 @@ class WalletService {
     } on WalletCancelled {
       rethrow;
     } on Object catch (error) {
+      if (_looksLikeNoWallet(error)) {
+        throw const WalletCancelled(
+          'No Solana wallet app is installed. Escrow Pay signs through a '
+          'wallet, so you need one before you can connect.',
+          noWalletInstalled: true,
+        );
+      }
       throw WalletCancelled(_readable(error));
     }
   }
 
+  /// MWA launches the wallet through an intent. With nothing installed to
+  /// handle it, Android reports no matching activity — which arrives here
+  /// under a few different names depending on the layer that caught it.
+  static bool _looksLikeNoWallet(Object error) {
+    final text = error.toString();
+    return text.contains('NoWalletFound') ||
+        text.contains('ActivityNotFound') ||
+        text.contains('No Activity found') ||
+        text.contains('ERROR_WALLET_NOT_FOUND');
+  }
+
   String _readable(Object error) {
     final text = error.toString();
-    if (text.contains('NoWalletFound') || text.contains('ActivityNotFound')) {
-      return 'No Solana wallet app found. Install Solflare or Phantom first.';
-    }
     if (text.contains('timed out') || text.contains('Timeout')) {
       return 'The wallet did not respond in time. Try again.';
     }

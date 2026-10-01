@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/qr_payload.dart';
 import '../../solana/escrow_controller.dart';
 import '../../solana/wallet_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/palette.dart';
+import '../../widgets/gradient_button.dart';
 import '../../widgets/scan_frame.dart';
 import '../status/escrow_status_screen.dart';
 
@@ -34,10 +36,25 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   bool _handled = false;
   String? _rejection;
 
+  /// Bumped to force a fresh MobileScanner after a permission change.
+  int _cameraAttempt = 0;
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Rebuilds the preview after permission is granted. `start()` on a
+  /// controller that failed to initialise is not enough — MobileScanner keeps
+  /// showing the error until the widget is recreated.
+  Future<void> _restartCamera() async {
+    setState(() => _cameraAttempt++);
+    try {
+      await _controller.start();
+    } on Object {
+      // A second failure re-renders the same screen through errorBuilder.
+    }
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
@@ -101,9 +118,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
         fit: StackFit.expand,
         children: [
           MobileScanner(
+            key: ValueKey(_cameraAttempt),
             controller: _controller,
             onDetect: _onDetect,
-            errorBuilder: (context, error) => _CameraProblem(error: error),
+            errorBuilder: (context, error) =>
+                _CameraProblem(error: error, onRetry: _restartCamera),
           ),
 
           // The frame paints its own scrim, so it must sit above the preview.
@@ -155,13 +174,74 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   }
 }
 
-class _CameraProblem extends StatelessWidget {
-  const _CameraProblem({required this.error});
+/// Shown when the camera will not start.
+///
+/// The old version told the user to go to system settings, which is the one
+/// thing most people will not do. Android only shows the permission dialog
+/// again if the user has not permanently denied it, so this asks directly
+/// first and falls back to opening settings only when Android will no longer
+/// prompt.
+class _CameraProblem extends ConsumerStatefulWidget {
+  const _CameraProblem({required this.error, required this.onRetry});
+
   final MobileScannerException error;
+
+  /// Restarts the scanner once permission has actually been granted.
+  final Future<void> Function() onRetry;
+
+  @override
+  ConsumerState<_CameraProblem> createState() => _CameraProblemState();
+}
+
+class _CameraProblemState extends ConsumerState<_CameraProblem> {
+  bool _busy = false;
+
+  /// True once Android stops showing the dialog, which is the only point at
+  /// which sending someone to settings is the right advice.
+  bool _mustUseSettings = false;
+
+  bool get _denied =>
+      widget.error.errorCode == MobileScannerErrorCode.permissionDenied;
+
+  Future<void> _requestAccess() async {
+    setState(() => _busy = true);
+    try {
+      final status = await Permission.camera.request();
+
+      if (status.isGranted || status.isLimited) {
+        await widget.onRetry();
+        return;
+      }
+
+      // permanentlyDenied means Android will not show the dialog again;
+      // restricted means policy forbids it outright.
+      if (mounted && (status.isPermanentlyDenied || status.isRestricted)) {
+        setState(() => _mustUseSettings = true);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
+    final text = Theme.of(context).textTheme;
+
+    final title = !_denied
+        ? 'The camera could not start'
+        : _mustUseSettings
+        ? 'Camera access is blocked'
+        : 'Escrow Pay needs the camera';
+
+    final body = !_denied
+        ? widget.error.errorDetails?.message ??
+              'Something else may be using the camera. Close other apps and '
+                  'try again.'
+        : _mustUseSettings
+        ? 'Android will not ask again, so camera access has to be switched on '
+              'in Settings. It is one toggle — we will open the page for you.'
+        : 'It is only used to read the seller’s QR code, and only while this '
+              'screen is open.';
 
     return ColoredBox(
       color: Palette.void_,
@@ -171,26 +251,63 @@ class _CameraProblem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                denied
-                    ? Icons.no_photography_outlined
-                    : Icons.videocam_off_outlined,
-                size: 40,
-                color: Palette.textMuted,
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  gradient: Palette.accentSoft,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Palette.hairlineStrong),
+                ),
+                child: Icon(
+                  _denied
+                      ? Icons.photo_camera_outlined
+                      : Icons.videocam_off_outlined,
+                  size: 30,
+                  color: Palette.cyan,
+                ),
               ),
-              Gap.md,
-              Text(
-                denied ? 'Camera access is off' : 'The camera could not start',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              Gap.lg,
+              Text(title, style: text.titleLarge, textAlign: TextAlign.center),
               Gap.sm,
-              Text(
-                denied
-                    ? 'Escrow Pay needs the camera to read the seller’s QR '
-                          'code. Enable it in system settings and come back.'
-                    : error.errorDetails?.message ?? 'Try relaunching the app.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
+              Text(body, textAlign: TextAlign.center, style: text.bodyMedium),
+              Gap.xl,
+
+              if (!_denied)
+                GradientButton(
+                  label: 'Try again',
+                  icon: Icons.refresh_rounded,
+                  busy: _busy,
+                  onPressed: () async {
+                    setState(() => _busy = true);
+                    await widget.onRetry();
+                    if (mounted) setState(() => _busy = false);
+                  },
+                )
+              else if (_mustUseSettings)
+                GradientButton(
+                  label: 'Open settings',
+                  icon: Icons.settings_outlined,
+                  busy: _busy,
+                  onPressed: () async {
+                    await openAppSettings();
+                    // Android does not tell us when they come back, so
+                    // re-check on the next frame the user triggers.
+                    if (mounted) setState(() => _mustUseSettings = false);
+                  },
+                )
+              else
+                GradientButton(
+                  label: 'Allow camera access',
+                  icon: Icons.photo_camera_outlined,
+                  busy: _busy,
+                  onPressed: _requestAccess,
+                ),
+
+              Gap.md,
+              TextButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Not now'),
               ),
             ],
           ),

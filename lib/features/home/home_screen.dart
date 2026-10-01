@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/money.dart';
 import '../../solana/wallet_controller.dart';
@@ -10,6 +11,7 @@ import '../../theme/typography.dart';
 import '../../widgets/circuit_backdrop.dart';
 import '../../widgets/glass_panel.dart';
 import '../create_listing/create_listing_screen.dart';
+import '../history/history_screen.dart';
 import '../scan/scan_screen.dart';
 
 /// The fork in the road: sell or buy.
@@ -37,6 +39,15 @@ class HomeScreen extends ConsumerWidget {
                   children: [
                     const _Mark(),
                     const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).push(_fade(const HistoryScreen())),
+                      icon: const Icon(Icons.receipt_long_outlined, size: 19),
+                      color: Palette.textSecondary,
+                      tooltip: 'Your trades',
+                    ),
+                    Gap.xs,
                     _ClusterBadge(label: cluster.label),
                   ],
                 ),
@@ -210,6 +221,26 @@ class _WalletStrip extends ConsumerWidget {
   const _WalletStrip({required this.wallet});
   final WalletState wallet;
 
+  /// Solflare is the wallet Solana Mobile's own docs point developers at, and
+  /// it supports devnet, which this build needs.
+  static final _solflare = Uri.parse(
+    'https://play.google.com/store/apps/details?id=com.solflare.mobile',
+  );
+
+  Future<void> _installWallet(BuildContext context) async {
+    final opened = await launchUrl(
+      _solflare,
+      mode: LaunchMode.externalApplication,
+    );
+    if (opened || !context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open the Play Store. Search for "Solflare".'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(walletControllerProvider.notifier);
@@ -217,22 +248,8 @@ class _WalletStrip extends ConsumerWidget {
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 260),
-      child: session == null
-          ? TextButton.icon(
-              key: const ValueKey('disconnected'),
-              onPressed: wallet.connecting ? null : controller.connect,
-              icon: wallet.connecting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.account_balance_wallet_outlined, size: 16),
-              label: Text(
-                wallet.connecting ? 'Opening wallet…' : 'Connect a wallet',
-              ),
-            )
-          : Row(
+      child: session != null
+          ? Row(
               key: const ValueKey('connected'),
               children: [
                 const Icon(
@@ -251,7 +268,133 @@ class _WalletStrip extends ConsumerWidget {
                   child: const Text('Disconnect'),
                 ),
               ],
+            )
+          : Column(
+              key: const ValueKey('disconnected'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Previously the failure was stored and never drawn, so a tap
+                // with no wallet installed just stopped the spinner and looked
+                // like a dead button.
+                if (wallet.error != null) ...[
+                  _WalletProblem(
+                    message: wallet.error!,
+                    actionLabel: wallet.noWalletInstalled
+                        ? 'Install Solflare'
+                        : null,
+                    onAction: wallet.noWalletInstalled
+                        ? () => _installWallet(context)
+                        : null,
+                    onDismiss: controller.clearError,
+                  ),
+                  Gap.sm,
+                ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: wallet.connecting ? null : controller.connect,
+                    icon: wallet.connecting
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.account_balance_wallet_outlined,
+                            size: 16,
+                          ),
+                    label: Text(
+                      wallet.connecting
+                          ? 'Opening wallet…'
+                          : wallet.error != null
+                          ? 'Try again'
+                          : 'Connect a wallet',
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
+  }
+}
+
+/// A failed wallet handoff, with the one action that can fix it when there is
+/// one. Warning rather than error: nothing is broken, something is missing.
+class _WalletProblem extends StatelessWidget {
+  const _WalletProblem({
+    required this.message,
+    required this.onDismiss,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        borderRadius: Radii.control,
+        color: Palette.warning.withValues(alpha: 0.10),
+        border: Border.all(color: Palette.warning.withValues(alpha: 0.38)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 17,
+                color: Palette.warning,
+              ),
+              Gap.md,
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: Palette.warning,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: onDismiss,
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 15,
+                    color: Palette.warning,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (actionLabel != null) ...[
+            Gap.sm,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.download_rounded, size: 17),
+                label: Text(actionLabel!),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Palette.warning,
+                  foregroundColor: Palette.void_,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    ).animate().fadeIn(duration: 220.ms).slideY(begin: -0.1);
   }
 }
