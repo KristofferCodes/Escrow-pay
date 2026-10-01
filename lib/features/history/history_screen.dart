@@ -11,7 +11,9 @@ import '../../theme/palette.dart';
 import '../../theme/typography.dart';
 import '../../widgets/address_chip.dart';
 import '../../widgets/circuit_backdrop.dart';
+import '../../widgets/deadline_ticker.dart';
 import '../../widgets/glass_panel.dart';
+import '../../widgets/gradient_button.dart';
 import '../../widgets/shimmer_block.dart';
 
 /// Everything this wallet has bought or sold.
@@ -73,6 +75,7 @@ class HistoryScreen extends ConsumerWidget {
                   return _TradeTile(
                         escrow: escrow,
                         side: escrow.sideFor(session!.address.value),
+                        wallet: session.address.value,
                       )
                       .animate(delay: (index * 40).ms)
                       .fadeIn()
@@ -170,16 +173,45 @@ class _Stat extends StatelessWidget {
   }
 }
 
-class _TradeTile extends StatelessWidget {
-  const _TradeTile({required this.escrow, required this.side});
+class _TradeTile extends ConsumerStatefulWidget {
+  const _TradeTile({
+    required this.escrow,
+    required this.side,
+    required this.wallet,
+  });
 
   final Escrow escrow;
   final TradeSide side;
+  final String wallet;
+
+  @override
+  ConsumerState<_TradeTile> createState() => _TradeTileState();
+}
+
+class _TradeTileState extends ConsumerState<_TradeTile> {
+  bool _claiming = false;
+  String? _error;
+
+  Future<void> _claim() async {
+    setState(() {
+      _claiming = true;
+      _error = null;
+    });
+    try {
+      await ref.read(historyControllerProvider.notifier).claim(widget.escrow);
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _claiming = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final escrow = widget.escrow;
     final accent = Palette.forState(escrow.state.key);
-    final bought = side == TradeSide.bought;
+    final bought = widget.side == TradeSide.bought;
+    final claimable = escrow.claimableBy(widget.wallet);
 
     // The counterparty is whoever you weren't.
     final counterparty = bought ? escrow.seller : escrow.buyer;
@@ -257,6 +289,33 @@ class _TradeTile extends StatelessWidget {
               AddressChip(address: counterparty, label: bought ? 'to' : 'from'),
             ],
           ),
+
+          // While an escrow is live the deadline is the most useful thing on
+          // the tile: it says who currently holds the decision.
+          if (escrow.state == EscrowState.funded) ...[
+            Gap.md,
+            const Divider(height: 1),
+            Gap.md,
+            _Countdown(escrow: escrow, bought: bought),
+          ],
+
+          if (claimable) ...[
+            Gap.md,
+            GradientButton(
+              label: 'Claim your funds',
+              icon: Icons.savings_outlined,
+              busy: _claiming,
+              onPressed: _claim,
+            ),
+          ],
+
+          if (_error != null) ...[
+            Gap.sm,
+            Text(
+              _error!,
+              style: const TextStyle(color: Palette.danger, fontSize: 12),
+            ),
+          ],
         ],
       ),
     );
@@ -273,6 +332,51 @@ class _TradeTile extends StatelessWidget {
 
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(value.day)}/${two(value.month)}/${value.year}';
+  }
+}
+
+/// Says who holds the decision, and for how long.
+class _Countdown extends StatelessWidget {
+  const _Countdown({required this.escrow, required this.bought});
+
+  final Escrow escrow;
+  final bool bought;
+
+  @override
+  Widget build(BuildContext context) {
+    return DeadlineTicker(
+      deadline: escrow.deadline,
+      builder: (context, remaining) {
+        final closed = remaining.isNegative;
+        final tint = closed ? Palette.success : Palette.cyan;
+
+        final message = closed
+            ? (bought
+                  ? 'Refund window closed — the seller can now claim.'
+                  : 'Refund window closed — you can claim these funds.')
+            : (bought
+                  ? 'You can refund for another ${formatRemaining(remaining)}.'
+                  : 'The buyer can refund for another '
+                        '${formatRemaining(remaining)}.');
+
+        return Row(
+          children: [
+            Icon(
+              closed ? Icons.lock_clock_outlined : Icons.timelapse_rounded,
+              size: 15,
+              color: tint,
+            ),
+            Gap.sm,
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: tint, fontSize: 11.5, height: 1.35),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 

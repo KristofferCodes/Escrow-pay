@@ -53,6 +53,7 @@ abstract final class EscrowProgram {
     required Address seller,
     required int nonce,
     required int lamports,
+    required int timeoutSeconds,
   }) => Instruction(
     programAddress: programId,
     accounts: [
@@ -65,6 +66,7 @@ abstract final class EscrowProgram {
       discriminator('initialize_escrow'),
       _u64(nonce),
       _u64(lamports),
+      _i64(timeoutSeconds),
     ]),
   );
 
@@ -97,6 +99,20 @@ abstract final class EscrowProgram {
     data: discriminator('confirm_receipt'),
   );
 
+  /// Seller takes the funds once the refund window has closed. The only
+  /// instruction the seller can call.
+  static Instruction claim({
+    required Address escrow,
+    required Address seller,
+  }) => Instruction(
+    programAddress: programId,
+    accounts: [
+      AccountMeta(address: escrow, role: AccountRole.writable),
+      AccountMeta(address: seller, role: AccountRole.writableSigner),
+    ],
+    data: discriminator('claim'),
+  );
+
   /// Returns the escrow to the buyer.
   static Instruction refund({
     required Address escrow,
@@ -109,6 +125,11 @@ abstract final class EscrowProgram {
     ],
     data: discriminator('refund'),
   );
+
+  static Uint8List _i64(int value) {
+    final bytes = ByteData(8)..setInt64(0, value, Endian.little);
+    return bytes.buffer.asUint8List();
+  }
 
   static Uint8List _u64(int value) {
     final bytes = ByteData(8)..setUint64(0, value, Endian.little);

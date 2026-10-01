@@ -66,12 +66,40 @@ PDA seeds — `[b"escrow", seller, buyer, nonce]`
 EscrowAccount { seller, buyer, amount, state, created_at, nonce, bump }
 ```
 
-| Instruction         | Signer | Effect                                  |
-| ------------------- | ------ | --------------------------------------- |
-| `initialize_escrow` | buyer  | Writes the terms. `-> Created`           |
-| `deposit`           | buyer  | Moves lamports into the PDA. `-> Funded` |
-| `confirm_receipt`   | buyer  | Pays the seller. `-> Released`           |
-| `refund`            | buyer  | Pays the buyer back. `-> Refunded`       |
+| Instruction         | Signer | Effect                                        |
+| ------------------- | ------ | --------------------------------------------- |
+| `initialize_escrow` | buyer  | Writes the terms and the deadline. `-> Created` |
+| `deposit`           | buyer  | Moves lamports into the PDA. `-> Funded`       |
+| `confirm_receipt`   | buyer  | Pays the seller. `-> Released`                 |
+| `refund`            | buyer  | Pays the buyer back, **before the deadline**. `-> Refunded` |
+| `claim`             | seller | Pays the seller, **after the deadline**. `-> Released` |
+
+### The refund window
+
+Without a deadline the buyer holds every card: they can take the goods and
+simply never confirm, leaving the seller's money stuck forever. A chain cannot
+know whether a phone changed hands in a car park — that is an oracle problem,
+and no escrow solves it. What a deadline decides is **who a stalemate
+favours**.
+
+Before it, the buyer can refund. After it, the seller can claim and the buyer
+can no longer refund. Confirming stays available throughout, because paying
+the seller is never the harmful direction. Doing nothing is no longer free.
+
+The seller writes the timeout into the QR, so the program bounds it: **1 hour
+minimum, 30 days maximum**. Without the floor a hostile seller could set one
+second and claim before the buyer had left. The buyer also sees the window on
+the review screen before signing, so a short one can be declined rather than
+discovered afterwards.
+
+This does **not** resolve a buyer who takes the goods and refunds immediately.
+Nothing arbiter-free does — see [Roadmap](#roadmap).
+
+Testing the window needs a clock that moves, and `solana-test-validator`
+cannot warp. The floor is feature-gated down to one second under
+`--features test-timeouts`; a Rust unit test asserts the production value is
+still 3600 when that feature is off, and `devnet-smoke.js` checks the deployed
+program rejects a one-second window.
 
 Payouts move only the escrowed amount and leave the rent deposit behind, so a
 settled escrow stays readable and the app can still show what happened.
@@ -376,7 +404,7 @@ builds by hand, and asserts the seller received exactly the escrowed amount.
 Run it after every deploy — a mismatch between the app and the live program
 surfaces here instead of in someone's hands.
 
-`anchor test --validator legacy` covers the chain: every state transition, and
+`anchor test --validator legacy -- --features test-timeouts` covers the chain: every state transition, and
 the ways each one can be abused — the seller releasing to themselves, a payout
 redirected to a third wallet, double release, refund after release. 14 tests,
 about 18 seconds.
@@ -391,9 +419,57 @@ to whatever that says, so pointing it at devnet makes every test run depend on a
 funded devnet wallet and the public faucet — which is rate limited. Deploy to
 devnet explicitly with the flag above.
 
+## Roadmap
+
+Ordered by how much each one widens what the escrow can actually protect.
+
+### Disputes, with an arbiter who can only pay buyer or seller
+
+The timeout decides who a stalemate favours; it does not decide who is right.
+An arbiter would — but the moment a third party can move funds, they can steal
+them. So the role is deliberately crippled: an arbiter can pick **buyer or
+seller and nothing else**. No partial splits, no third address, no ability to
+hold. Written as a `resolve` instruction with the destination constrained to
+the two keys already recorded in the account, it is auditable onchain and the
+worst an arbiter can do is be wrong, not rich.
+
+Opt-in per trade, named in the QR, so neither side can add one after the fact.
+
+### An inspection window for faults found later
+
+The current window is one clock running from funding. Some faults only show up
+on first use — a phone that dies overnight, a laptop that throttles under
+load. A second, longer window that only a dispute can draw on would cover
+that without leaving every trade open for days.
+
+### Photo and video evidence, fingerprinted onchain
+
+An arbiter needs something to look at, and the chain is the wrong place to
+store a video. Hash the media, write the digest to the escrow account, keep
+the file off-chain. That proves the evidence existed at the time it was
+recorded and has not been edited since — which is the part that has to be
+trustworthy. Cheap: one hash per side.
+
+### A release QR for courier deliveries
+
+In-person trades are the easy case: both parties are present. Courier
+deliveries break the model, because the buyer confirms receipt hours or days
+later and the seller has already lost control of the goods.
+
+A release QR travels with the parcel. Scanning it at handover is what starts
+the inspection clock, so the window begins when the buyer actually has the
+item rather than when they paid. Natural fit for a delivery partner such as
+**Muvvit**, where the courier's scan is the handover event.
+
+### USDC
+
+Pricing a used phone in SOL means agreeing a number that moves between
+agreeing it and settling. `EscrowAccount` is laid out so an SPL vault slots in
+without changing the PDA derivation — the work is a token account owned by the
+escrow PDA and SPL transfer variants of the three payout paths.
+
 ## Not yet done
 
-- **USDC / SPL settlement.** v1 is SOL only. The account layout leaves room.
 - **Persisted wallet sessions.** The MWA auth token lives in memory, so a
   relaunch means approving again.
 - **Rive assets.** The status ring and scan frame are `CustomPainter`

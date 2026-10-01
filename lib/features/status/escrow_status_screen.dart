@@ -13,6 +13,7 @@ import '../../theme/typography.dart';
 import '../../widgets/address_chip.dart';
 import '../../widgets/circuit_backdrop.dart';
 import '../../widgets/confirm_burst.dart';
+import '../../widgets/deadline_ticker.dart';
 import '../../widgets/glass_panel.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/shimmer_block.dart';
@@ -72,6 +73,8 @@ class EscrowStatusScreen extends ConsumerWidget {
                   _Headline(view: view, accent: accent),
                   Gap.lg,
                   _Details(view: view, cluster: cluster.label),
+                  Gap.md,
+                  _InspectionWindow(view: view),
                   if (view.error != null) ...[
                     Gap.md,
                     _ErrorPanel(
@@ -131,6 +134,113 @@ class _Ring extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// What the refund window means, in the terms that matter at this moment.
+///
+/// Before funding it is the reason to go ahead or walk away — a seller who
+/// asks for one hour is asking you to accept the goods almost sight unseen,
+/// and that is worth seeing before signing rather than after.
+class _InspectionWindow extends StatelessWidget {
+  const _InspectionWindow({required this.view});
+
+  final EscrowView view;
+
+  @override
+  Widget build(BuildContext context) {
+    final escrow = view.escrow;
+    final offer = view.offer;
+    if (escrow == null && offer == null) return const SizedBox.shrink();
+
+    // Before the escrow exists the window is still just the seller's offer.
+    final window = escrow != null
+        ? escrow.deadline.difference(escrow.createdAt)
+        : Duration(seconds: offer!.timeoutSeconds);
+
+    final settled = escrow?.state.isSettled ?? false;
+    if (settled) return const SizedBox.shrink();
+
+    final funded = escrow?.state == EscrowState.funded;
+    final closed = escrow?.refundWindowClosed ?? false;
+
+    // Only the funded-and-open case changes second to second.
+    if (funded && !closed) {
+      return DeadlineTicker(
+        deadline: escrow!.deadline,
+        builder: (context, remaining) => _Banner(
+          icon: Icons.inventory_2_outlined,
+          tint: Palette.cyan,
+          message:
+              'Ready for handover. Check the item properly before you '
+              'release — once you confirm, the money is gone. You have '
+              '${formatRemaining(remaining)} left to refund instead.',
+        ),
+      );
+    }
+
+    final (icon, tint, message) = switch ((funded, closed)) {
+      // Window elapsed: the seller now holds the decision.
+      (true, true) => (
+        Icons.lock_clock_outlined,
+        Palette.warning,
+        'The refund window has closed. The seller can now claim these funds, '
+            'and you can no longer refund yourself.',
+      ),
+      // Not funded yet: this is the term being offered.
+      _ => (
+        Icons.timelapse_rounded,
+        Palette.textSecondary,
+        'You will have ${_window(window)} to inspect the item and refund '
+            'yourself. After that the seller can claim the funds even if you '
+            'never confirm.',
+      ),
+    };
+
+    return _Banner(icon: icon, tint: tint, message: message);
+  }
+
+  static String _window(Duration d) {
+    if (d.inHours >= 48) return '${d.inDays} days';
+    if (d.inHours >= 24) return '${d.inHours} hours';
+    return '${d.inHours} hour${d.inHours == 1 ? '' : 's'}';
+  }
+}
+
+class _Banner extends StatelessWidget {
+  const _Banner({
+    required this.icon,
+    required this.tint,
+    required this.message,
+  });
+
+  final IconData icon;
+  final Color tint;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        borderRadius: Radii.control,
+        color: tint.withValues(alpha: 0.09),
+        border: Border.all(color: tint.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 17, color: tint),
+          Gap.md,
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: tint, fontSize: 12.5, height: 1.45),
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 260.ms);
   }
 }
 

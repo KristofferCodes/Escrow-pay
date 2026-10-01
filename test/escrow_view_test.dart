@@ -20,6 +20,7 @@ void main() {
     amount: amount,
     state: state,
     createdAt: DateTime.utc(2026, 9, 24),
+    deadline: DateTime.now().add(const Duration(hours: 24)),
     nonce: 7,
     bump: 254,
   );

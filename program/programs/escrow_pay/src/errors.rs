@@ -12,4 +12,10 @@ pub enum EscrowError {
     InsufficientFunds,
     #[msg("Escrow PDA does not hold the lamports it claims to")]
     VaultUnderfunded,
+    #[msg("Timeout must be between 1 hour and 30 days")]
+    TimeoutOutOfRange,
+    #[msg("The refund window has closed; the seller can now claim")]
+    RefundWindowClosed,
+    #[msg("The refund window is still open; the buyer may still refund")]
+    DeadlineNotReached,
 }

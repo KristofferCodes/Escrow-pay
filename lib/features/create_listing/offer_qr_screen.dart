@@ -21,6 +21,9 @@ class OfferQrScreen extends StatelessWidget {
 
   final EscrowOffer offer;
 
+  static String _window(Duration d) =>
+      d.inHours >= 24 ? '${d.inDays}d' : '${d.inHours}h';
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -110,6 +113,12 @@ class OfferQrScreen extends StatelessWidget {
                     DetailRow(
                       label: 'Reference',
                       value: '${offer.nonce}',
+                      valueStyle: AppType.mono(size: 12.5),
+                    ),
+                    const Divider(height: 18),
+                    DetailRow(
+                      label: 'Refund window',
+                      value: _window(offer.timeout),
                       valueStyle: AppType.mono(size: 12.5),
                     ),
                     const Divider(height: 18),

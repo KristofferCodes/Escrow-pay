@@ -55,13 +55,14 @@ void main() {
     cluster: 'devnet',
   );
 
-  Escrow escrowIn(EscrowState state) => Escrow(
+  Escrow escrowIn(EscrowState state, {DateTime? deadline}) => Escrow(
     address: escrowAddress.value,
     seller: seller,
     buyer: buyer,
     amount: 1500000000,
     state: state,
     createdAt: DateTime.utc(2026, 9, 24, 12),
+    deadline: deadline ?? DateTime.now().add(const Duration(hours: 24)),
     nonce: 7,
     bump: 254,
   );
@@ -82,6 +83,53 @@ void main() {
     // waiting for quiescence.
     await tester.pump(const Duration(milliseconds: 600));
   }
+
+  testWidgets('states the inspection window before anything is signed', (
+    tester,
+  ) async {
+    // The seller picks this window, so the buyer has to be able to see a
+    // hostile one and walk away rather than discover it after paying.
+    await pump(tester, const EscrowView(offer: offer));
+
+    expect(find.textContaining('24 hours to inspect'), findsOneWidget);
+    expect(find.textContaining('seller can claim'), findsOneWidget);
+  });
+
+  testWidgets('tells the buyer to inspect once funded', (tester) async {
+    await pump(
+      tester,
+      EscrowView(offer: offer, escrow: escrowIn(EscrowState.funded)),
+    );
+
+    expect(find.textContaining('Ready for handover'), findsOneWidget);
+    expect(find.textContaining('left to refund instead'), findsOneWidget);
+  });
+
+  testWidgets('says the window has closed once it has', (tester) async {
+    await pump(
+      tester,
+      EscrowView(
+        offer: offer,
+        escrow: escrowIn(
+          EscrowState.funded,
+          deadline: DateTime.now().subtract(const Duration(minutes: 5)),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('refund window has closed'), findsOneWidget);
+    expect(find.textContaining('Ready for handover'), findsNothing);
+  });
+
+  testWidgets('drops the window note once settled', (tester) async {
+    await pump(
+      tester,
+      EscrowView(offer: offer, escrow: escrowIn(EscrowState.released)),
+    );
+
+    expect(find.textContaining('inspect'), findsNothing);
+    expect(find.textContaining('Ready for handover'), findsNothing);
+  });
 
   testWidgets('offers only funding before the escrow exists onchain', (
     tester,

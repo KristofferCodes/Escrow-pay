@@ -107,6 +107,7 @@ class EscrowRepository {
               seller: seller,
               nonce: offer.nonce,
               lamports: offer.lamports,
+              timeoutSeconds: offer.timeoutSeconds,
             ),
             EscrowProgram.deposit(escrow: escrow, buyer: buyer),
           ],
@@ -131,6 +132,20 @@ class EscrowRepository {
           buyer: buyer,
           seller: Address(escrow.seller),
         ),
+      ],
+    ),
+  );
+
+  /// Seller takes the funds once the refund window has closed.
+  Future<String> claim({
+    required WalletSession session,
+    required Escrow escrow,
+  }) => wallet.signAndSend(
+    session: session,
+    buildBase64Transaction: (seller) => _compile(
+      feePayer: seller,
+      instructions: [
+        EscrowProgram.claim(escrow: Address(escrow.address), seller: seller),
       ],
     ),
   );

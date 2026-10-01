@@ -11,6 +11,7 @@ Uint8List encodeAccount({
   required int amount,
   required int state,
   required int createdAt,
+  required int deadline,
   required int nonce,
   required int bump,
 }) {
@@ -32,6 +33,8 @@ Uint8List encodeAccount({
   offset += 1;
   view.setInt64(offset, createdAt, Endian.little);
   offset += 8;
+  view.setInt64(offset, deadline, Endian.little);
+  offset += 8;
   view.setUint64(offset, nonce, Endian.little);
   offset += 8;
   view.setUint8(offset, bump);
@@ -52,7 +55,7 @@ void main() {
   test('agrees with the program on the EscrowAccount size', () {
     // The Rust side pins the same number in `EscrowAccount::LEN`. If these two
     // ever disagree, every offset below is reading the wrong bytes.
-    expect(Escrow.encodedLength, 98);
+    expect(Escrow.encodedLength, 106);
   });
 
   test('decodes every field at the right offset', () {
@@ -63,6 +66,7 @@ void main() {
         amount: 1500000000,
         state: 1,
         createdAt: 1727180000,
+        deadline: 1727266400,
         nonce: 77,
         bump: 254,
       ),
@@ -94,6 +98,7 @@ void main() {
           amount: 1,
           state: ordinal,
           createdAt: 0,
+          deadline: 3600,
           nonce: 0,
           bump: 255,
         ),
@@ -114,6 +119,7 @@ void main() {
           amount: 1,
           state: 9,
           createdAt: 0,
+          deadline: 3600,
           nonce: 0,
           bump: 255,
         ),

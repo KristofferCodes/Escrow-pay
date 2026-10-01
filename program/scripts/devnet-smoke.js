@@ -10,11 +10,21 @@
 // Spends a few thousand lamports of the deployer's devnet SOL as the buyer.
 
 const anchor = require("@coral-xyz/anchor");
-const { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } = require("@solana/web3.js");
+const {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  LAMPORTS_PER_SOL,
+} = require("@solana/web3.js");
 const fs = require("fs");
 const os = require("os");
 
 const AMOUNT = Math.floor(0.01 * LAMPORTS_PER_SOL);
+
+// The deployed program's floor. Nothing here changes it — the claim path is
+// verified by its refusals, not by waiting an hour for a window to close.
+const HOUR = 60 * 60;
 
 function loadKeypair(path) {
   const secret = JSON.parse(fs.readFileSync(path.replace("~", os.homedir()), "utf8"));
@@ -96,6 +106,24 @@ async function sendAndConfirm(provider, tx, signers = []) {
   const buyer = loadKeypair(process.env.ANCHOR_WALLET);
   const seller = Keypair.generate();
   const nonce = new anchor.BN(Date.now());
+  const failures = [];
+
+  /// Asserts an instruction is refused with a specific program error.
+  async function expectRejected(label, expected, send) {
+    try {
+      await send();
+      failures.push(`${label}: expected ${expected}, but it succeeded`);
+      console.log(`  ✗ ${label} — expected ${expected}, succeeded`);
+    } catch (e) {
+      const code = e?.error?.errorCode?.code ?? e.message;
+      if (code === expected) {
+        console.log(`  ✓ ${label} — refused with ${expected}`);
+      } else {
+        failures.push(`${label}: expected ${expected}, got ${code}`);
+        console.log(`  ✗ ${label} — expected ${expected}, got ${code}`);
+      }
+    }
+  }
 
   console.log("rpc     :", redact(process.env.ANCHOR_PROVIDER_URL));
   console.log("program :", program.programId.toBase58());
@@ -115,9 +143,38 @@ async function sendAndConfirm(provider, tx, signers = []) {
   );
   console.log("escrow  :", escrow.toBase58(), "\n");
 
-  // 1. open + fund, in one transaction, the way the app does it.
+  // The seller signs the claim attempts, so it needs enough for fees. A
+  // transfer, not an airdrop: the devnet faucet is rate limited by IP.
+  await sendAndConfirm(
+    provider,
+    new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: buyer.publicKey,
+        toPubkey: seller.publicKey,
+        lamports: Math.floor(0.01 * LAMPORTS_PER_SOL),
+      })
+    )
+  );
+
+  // 1. The timeout floor is live. This is also what proves the upgraded
+  // program is the one deployed: the old build had no timeout argument.
+  console.log("timeout bounds");
+  await expectRejected("one-second window", "TimeoutOutOfRange", () =>
+    program.methods
+      .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(1))
+      .accounts({
+        escrow,
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc()
+  );
+  console.log("");
+
+  // 2. open + fund, in one transaction, the way the app does it.
   const fundTx = await program.methods
-    .initializeEscrow(nonce, new anchor.BN(AMOUNT))
+    .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(24 * HOUR))
     .accounts({
       escrow,
       buyer: buyer.publicKey,
@@ -141,7 +198,20 @@ async function sendAndConfirm(provider, tx, signers = []) {
   console.log("fund    :", Object.keys(account.state)[0], "|", sigFund);
   if (!("funded" in account.state)) throw new Error("expected Funded");
 
-  // 2. release to the seller.
+  // 3. The seller cannot claim while the buyer's window is open. Proves the
+  // claim instruction is deployed and gated, without waiting out a deadline.
+  console.log("");
+  console.log("claim gating");
+  await expectRejected("claim before deadline", "DeadlineNotReached", () =>
+    program.methods
+      .claim()
+      .accounts({ escrow, seller: seller.publicKey })
+      .signers([seller])
+      .rpc()
+  );
+  console.log("");
+
+  // 4. release to the seller.
   const before = await connection.getBalance(seller.publicKey);
   const releaseTx = await program.methods
     .confirmReceipt()
@@ -158,9 +228,22 @@ async function sendAndConfirm(provider, tx, signers = []) {
     throw new Error(`seller received ${after - before}, expected ${AMOUNT}`);
   }
 
+  // 5. A settled escrow is closed to everyone, claim included.
+  console.log("");
+  await expectRejected("claim after release", "InvalidState", () =>
+    program.methods
+      .claim()
+      .accounts({ escrow, seller: seller.publicKey })
+      .signers([seller])
+      .rpc()
+  );
+
   console.log("\nseller received exactly", (after - before) / LAMPORTS_PER_SOL, "SOL");
   console.log("explorer:",
     `https://explorer.solana.com/tx/${sigRelease}?cluster=devnet`);
+  if (failures.length) {
+    throw new Error(`\n  - ${failures.join("\n  - ")}`);
+  }
   console.log("\nDEVNET SMOKE TEST PASSED");
 })().catch((e) => {
   console.error("\nFAILED:", e.message);

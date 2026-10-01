@@ -43,16 +43,17 @@ class Escrow {
     required this.amount,
     required this.state,
     required this.createdAt,
+    required this.deadline,
     required this.nonce,
     required this.bump,
   });
 
   /// Byte layout of `EscrowAccount`, after the 8-byte Anchor discriminator:
-  /// seller(32) buyer(32) amount(u64) state(u8) created_at(i64) nonce(u64)
-  /// bump(u8).
+  /// seller(32) buyer(32) amount(u64) state(u8) created_at(i64)
+  /// deadline(i64) nonce(u64) bump(u8).
   static const _discriminatorLength = 8;
   static const encodedLength =
-      _discriminatorLength + 32 + 32 + 8 + 1 + 8 + 8 + 1;
+      _discriminatorLength + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 1;
 
   final String address;
   final String seller;
@@ -60,8 +61,18 @@ class Escrow {
   final int amount;
   final EscrowState state;
   final DateTime createdAt;
+
+  /// After this the buyer can no longer refund and the seller can claim.
+  final DateTime deadline;
+
   final int nonce;
   final int bump;
+
+  /// How long the buyer still has to dispute. Negative once it has passed.
+  Duration get timeRemaining => deadline.difference(DateTime.now());
+
+  /// True once the seller can claim and the buyer can no longer refund.
+  bool get refundWindowClosed => timeRemaining.isNegative;
 
   /// Decodes raw account data. Returns `null` rather than throwing when the
   /// bytes are not an escrow — an address collision or a stale program id
@@ -95,6 +106,9 @@ class Escrow {
     final createdAt = view.getInt64(offset, Endian.little);
     offset += 8;
 
+    final deadline = view.getInt64(offset, Endian.little);
+    offset += 8;
+
     final nonce = view.getUint64(offset, Endian.little);
     offset += 8;
 
@@ -110,6 +124,10 @@ class Escrow {
         createdAt * 1000,
         isUtc: true,
       ).toLocal(),
+      deadline: DateTime.fromMillisecondsSinceEpoch(
+        deadline * 1000,
+        isUtc: true,
+      ).toLocal(),
       nonce: nonce,
       bump: bump,
     );
@@ -122,6 +140,7 @@ class Escrow {
     amount: amount,
     state: state ?? this.state,
     createdAt: createdAt,
+    deadline: deadline,
     nonce: nonce,
     bump: bump,
   );

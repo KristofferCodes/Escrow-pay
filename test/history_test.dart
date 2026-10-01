@@ -17,6 +17,7 @@ void main() {
     amount: 1500000000,
     state: state,
     createdAt: DateTime.utc(2026, 9, 30),
+    deadline: DateTime.now().add(const Duration(hours: 24)),
     nonce: 1,
     bump: 254,
   );
@@ -41,14 +42,15 @@ void main() {
     test('memcmp offsets match the decoder', () {
       // getProgramAccounts filters by raw byte offset, so these have to track
       // EscrowAccount's layout: discriminator(8) seller(32) buyer(32).
-      // Verified against devnet: offset 40 returns this wallet's purchases.
+      // Unchanged by the deadline field, which sits after these — but the
+      // dataSize filter did change, so the length is pinned too.
       const discriminator = 8;
       const sellerOffset = discriminator;
       const buyerOffset = discriminator + 32;
 
       expect(sellerOffset, 8);
       expect(buyerOffset, 40);
-      expect(Escrow.encodedLength, 98);
+      expect(Escrow.encodedLength, 106);
     });
   });
 }

@@ -77,4 +77,57 @@ void main() {
   test('fresh nonces differ across listings', () {
     expect(EscrowOffer.freshNonce(), greaterThan(0));
   });
+
+  group('refund window', () {
+    test('round trips the timeout', () {
+      const short = EscrowOffer(
+        seller: seller,
+        lamports: 1,
+        nonce: 1,
+        item: 'x',
+        cluster: 'devnet',
+        timeoutSeconds: 6 * 60 * 60,
+      );
+      expect(EscrowOffer.decode(short.encode())!.timeoutSeconds, 21600);
+      expect(EscrowOffer.decode(short.encode())!.timeout.inHours, 6);
+    });
+
+    test('defaults to 24 hours', () {
+      expect(offer.timeoutSeconds, 86400);
+    });
+
+    test('rejects a window the program would refuse', () {
+      // The seller writes this into the QR, so a hostile one could ask for a
+      // second — which would let them claim before the buyer got home. The
+      // program enforces the same bounds; this just fails faster.
+      for (final seconds in [1, 59 * 60, 31 * 24 * 60 * 60]) {
+        expect(
+          EscrowOffer.decode(
+            'escrowpay:v1?s=$seller&a=1&n=1&c=devnet&t=$seconds',
+          ),
+          isNull,
+          reason: '$seconds should be out of range',
+        );
+      }
+    });
+
+    test('accepts both ends of the allowed range', () {
+      for (final seconds in [60 * 60, 30 * 24 * 60 * 60]) {
+        expect(
+          EscrowOffer.decode(
+            'escrowpay:v1?s=$seller&a=1&n=1&c=devnet&t=$seconds',
+          )!.timeoutSeconds,
+          seconds,
+        );
+      }
+    });
+
+    test('a code written before timeouts existed still scans', () {
+      final old = EscrowOffer.decode(
+        'escrowpay:v1?s=$seller&a=1&n=1&i=Thing&c=devnet',
+      );
+      expect(old, isNotNull);
+      expect(old!.timeoutSeconds, EscrowOffer.defaultTimeoutSeconds);
+    });
+  });
 }

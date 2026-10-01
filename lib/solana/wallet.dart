@@ -47,6 +47,14 @@ class WalletService {
 
   final Cluster cluster;
 
+  /// How long to wait for the wallet to answer before giving up.
+  ///
+  /// The plugin's own default is 30s, but relying on a default means a future
+  /// version could silently make the user stare at a spinner. Stated here so
+  /// the ceiling is ours: long enough for a cold wallet launch, short enough
+  /// that a wallet which never comes back surfaces as an error.
+  static const _handoffTimeout = Duration(seconds: 25);
+
   static final _identity = AppIdentity(
     name: 'Escrow Pay',
     uri: Uri.parse('https://escrowpay.app'),
@@ -64,7 +72,7 @@ class WalletService {
           chain: cluster.chain,
         );
         return _toSession(result);
-      });
+      }, connectionTimeout: _handoffTimeout);
     });
   }
 
@@ -78,24 +86,29 @@ class WalletService {
     required Future<String> Function(Address signer) buildBase64Transaction,
   }) async {
     return _guard(() async {
-      return transact((wallet) async {
-        final auth = await wallet.reauthorize(
-          authToken: session.authToken,
-          identity: _identity,
-        );
-        final signer = _addressOf(auth);
+      return transact(
+        (wallet) async {
+          final auth = await wallet.reauthorize(
+            authToken: session.authToken,
+            identity: _identity,
+          );
+          final signer = _addressOf(auth);
 
-        final payload = await buildBase64Transaction(signer);
-        final signatures = await wallet.signAndSendTransactions(
-          payloads: [payload],
-          options: const SignAndSendOptions(commitment: 'confirmed'),
-        );
+          final payload = await buildBase64Transaction(signer);
+          final signatures = await wallet.signAndSendTransactions(
+            payloads: [payload],
+            options: const SignAndSendOptions(commitment: 'confirmed'),
+          );
 
-        if (signatures.isEmpty) {
-          throw const WalletCancelled('The wallet returned no signature.');
-        }
-        return signatures.first;
-      });
+          if (signatures.isEmpty) {
+            throw const WalletCancelled('The wallet returned no signature.');
+          }
+          return signatures.first;
+        },
+        // Bounds reaching the wallet, not how long the user spends reading
+        // the confirmation sheet.
+        connectionTimeout: _handoffTimeout,
+      );
     });
   }
 

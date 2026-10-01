@@ -15,6 +15,9 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build"]
+# Lowers MIN_TIMEOUT_SECONDS so integration tests can watch a deadline pass.
+# Test-only — never enable this for a deployed build.
+test-timeouts = []
 
 [dependencies]
 anchor-lang = "1.2.0"

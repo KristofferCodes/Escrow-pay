@@ -6,6 +6,7 @@
 /// generic QR reader shows something meaningful.
 ///
 ///     escrowpay:v1?s=<seller>&a=<lamports>&n=<nonce>&i=<item>&c=<cluster>
+///         &t=<timeout seconds>
 ///
 /// Nothing here is trusted: the buyer confirms the seller address and amount on
 /// screen before signing, and the program re-derives the PDA from these same
@@ -17,10 +18,20 @@ class EscrowOffer {
     required this.nonce,
     required this.item,
     required this.cluster,
+    this.timeoutSeconds = defaultTimeoutSeconds,
   });
 
   static const scheme = 'escrowpay';
   static const version = 'v1';
+
+  /// Long enough that a buyer who gets home and finds a brick has time to
+  /// react; short enough that a seller is not waiting a week to be paid.
+  static const defaultTimeoutSeconds = 24 * 60 * 60;
+
+  /// Mirrors the bounds the program enforces. Checked here too so a bad QR is
+  /// rejected at the scanner instead of failing in the wallet.
+  static const minTimeoutSeconds = 60 * 60;
+  static const maxTimeoutSeconds = 30 * 24 * 60 * 60;
 
   /// Base58 address that will be paid on `confirm_receipt`.
   final String seller;
@@ -32,6 +43,12 @@ class EscrowOffer {
   /// real SOL by a buyer whose app is pointed elsewhere.
   final String cluster;
 
+  /// How long the buyer has to refund before the seller can claim. The seller
+  /// picks it, so the program enforces the bounds — see `MIN_TIMEOUT_SECONDS`.
+  final int timeoutSeconds;
+
+  Duration get timeout => Duration(seconds: timeoutSeconds);
+
   String encode() {
     final query = Uri(
       queryParameters: {
@@ -40,6 +57,7 @@ class EscrowOffer {
         'n': '$nonce',
         'i': item,
         'c': cluster,
+        't': '$timeoutSeconds',
       },
     ).query;
     return '$scheme:$version?$query';
@@ -73,6 +91,11 @@ class EscrowOffer {
     if (nonce == null || nonce < 0) return null;
     if (cluster == null || cluster.isEmpty) return null;
 
+    // Absent means a code written before timeouts existed; fall back rather
+    // than reject, since the program will apply its own bounds anyway.
+    final timeout = int.tryParse(params['t'] ?? '') ?? defaultTimeoutSeconds;
+    if (timeout < minTimeoutSeconds || timeout > maxTimeoutSeconds) return null;
+
     return EscrowOffer(
       seller: seller,
       lamports: lamports,
@@ -81,6 +104,7 @@ class EscrowOffer {
           ? params['i']!.trim()
           : 'Item',
       cluster: cluster,
+      timeoutSeconds: timeout,
     );
   }
 

@@ -31,8 +31,18 @@ pub mod escrow_pay {
     /// data. The seller never has to trust the buyer here — no funds move until
     /// `deposit`, and the only account `confirm_receipt` can pay is the seller
     /// recorded right here.
-    pub fn initialize_escrow(ctx: Context<InitializeEscrow>, nonce: u64, amount: u64) -> Result<()> {
+    pub fn initialize_escrow(
+        ctx: Context<InitializeEscrow>,
+        nonce: u64,
+        amount: u64,
+        timeout_seconds: i64,
+    ) -> Result<()> {
         require!(amount > 0, EscrowError::ZeroAmount);
+        require!(
+            (EscrowAccount::MIN_TIMEOUT_SECONDS..=EscrowAccount::MAX_TIMEOUT_SECONDS)
+                .contains(&timeout_seconds),
+            EscrowError::TimeoutOutOfRange
+        );
         require_keys_neq!(
             ctx.accounts.seller.key(),
             ctx.accounts.buyer.key(),
@@ -44,7 +54,11 @@ pub mod escrow_pay {
         escrow.buyer = ctx.accounts.buyer.key();
         escrow.amount = amount;
         escrow.state = EscrowState::Created;
-        escrow.created_at = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp;
+        escrow.created_at = now;
+        escrow.deadline = now
+            .checked_add(timeout_seconds)
+            .ok_or(EscrowError::TimeoutOutOfRange)?;
         escrow.nonce = nonce;
         escrow.bump = ctx.bumps.escrow;
 
@@ -54,6 +68,7 @@ pub mod escrow_pay {
             buyer: escrow.buyer,
             amount,
             nonce,
+            deadline: escrow.deadline,
         });
         Ok(())
     }
@@ -122,10 +137,18 @@ pub mod escrow_pay {
     }
 
     /// Buyer pulls out before confirming; the program pays the buyer back.
+    ///
+    /// Only until the deadline. After that the trade is presumed completed
+    /// and the seller can claim — otherwise a buyer could take the goods and
+    /// sit on the refund option indefinitely.
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         require!(
             ctx.accounts.escrow.state == EscrowState::Funded,
             EscrowError::InvalidState
+        );
+        require!(
+            Clock::get()?.unix_timestamp < ctx.accounts.escrow.deadline,
+            EscrowError::RefundWindowClosed
         );
 
         let amount = ctx.accounts.escrow.amount;
@@ -140,6 +163,39 @@ pub mod escrow_pay {
         emit!(EscrowRefunded {
             escrow: ctx.accounts.escrow.key(),
             buyer: ctx.accounts.escrow.buyer,
+            amount,
+        });
+        Ok(())
+    }
+
+    /// Seller takes the funds once the refund window has closed.
+    ///
+    /// The chain cannot know whether goods changed hands, so this does not
+    /// adjudicate anything — it decides who a stalemate favours. Before the
+    /// deadline the buyer holds the decision; after it, the seller does.
+    /// Doing nothing is no longer free.
+    pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        require!(
+            ctx.accounts.escrow.state == EscrowState::Funded,
+            EscrowError::InvalidState
+        );
+        require!(
+            Clock::get()?.unix_timestamp >= ctx.accounts.escrow.deadline,
+            EscrowError::DeadlineNotReached
+        );
+
+        let amount = ctx.accounts.escrow.amount;
+        pay_out(
+            &ctx.accounts.escrow.to_account_info(),
+            &ctx.accounts.seller.to_account_info(),
+            amount,
+        )?;
+
+        ctx.accounts.escrow.state = EscrowState::Released;
+
+        emit!(EscrowClaimed {
+            escrow: ctx.accounts.escrow.key(),
+            seller: ctx.accounts.escrow.seller,
             amount,
         });
         Ok(())
@@ -242,6 +298,28 @@ pub struct ConfirmReceipt<'info> {
     pub seller: UncheckedAccount<'info>,
 }
 
+/// The seller's one and only instruction.
+#[derive(Accounts)]
+pub struct Claim<'info> {
+    #[account(
+        mut,
+        has_one = seller,
+        seeds = [
+            EscrowAccount::SEED_PREFIX,
+            seller.key().as_ref(),
+            escrow.buyer.as_ref(),
+            &escrow.nonce.to_le_bytes(),
+        ],
+        bump = escrow.bump,
+    )]
+    pub escrow: Account<'info, EscrowAccount>,
+
+    /// Signs and is paid. `has_one` pins this to the key recorded at
+    /// initialization, so only the seller named in the QR can claim.
+    #[account(mut)]
+    pub seller: Signer<'info>,
+}
+
 #[derive(Accounts)]
 pub struct Refund<'info> {
     #[account(
@@ -268,6 +346,7 @@ pub struct EscrowInitialized {
     pub buyer: Pubkey,
     pub amount: u64,
     pub nonce: u64,
+    pub deadline: i64,
 }
 
 #[event]
@@ -278,6 +357,13 @@ pub struct EscrowFunded {
 
 #[event]
 pub struct EscrowReleased {
+    pub escrow: Pubkey,
+    pub seller: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct EscrowClaimed {
     pub escrow: Pubkey,
     pub seller: Pubkey,
     pub amount: u64,

@@ -29,6 +29,18 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
   final _item = TextEditingController();
   final _price = TextEditingController();
 
+  /// How long the buyer keeps the right to refund. After it, the seller can
+  /// claim — so this is the seller choosing how long to wait to be paid if
+  /// the buyer goes quiet.
+  int _timeoutSeconds = EscrowOffer.defaultTimeoutSeconds;
+
+  static const _timeoutChoices = <String, int>{
+    '1 hour': 60 * 60,
+    '6 hours': 6 * 60 * 60,
+    '24 hours': 24 * 60 * 60,
+    '3 days': 3 * 24 * 60 * 60,
+  };
+
   @override
   void dispose() {
     _item.dispose();
@@ -51,6 +63,7 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
       nonce: EscrowOffer.freshNonce(),
       item: _item.text.trim(),
       cluster: ref.read(clusterProvider).id,
+      timeoutSeconds: _timeoutSeconds,
     );
 
     await HapticFeedback.mediumImpact();
@@ -122,6 +135,40 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
                     ),
                   ],
                 ),
+              ),
+
+              Gap.lg,
+              Text('REFUND WINDOW', style: text.labelSmall),
+              Gap.sm,
+              Text(
+                'The buyer can call off the trade during this window. After '
+                'it, you can claim the funds even if they never confirm.',
+                style: text.bodyMedium,
+              ),
+              Gap.md,
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _timeoutChoices.entries.map((choice) {
+                  final selected = _timeoutSeconds == choice.value;
+                  return ChoiceChip(
+                    label: Text(choice.key),
+                    selected: selected,
+                    onSelected: (_) =>
+                        setState(() => _timeoutSeconds = choice.value),
+                    showCheckmark: false,
+                    labelStyle: TextStyle(
+                      color: selected ? Palette.void_ : Palette.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                    backgroundColor: Palette.surfaceRaised,
+                    selectedColor: Palette.cyan,
+                    side: BorderSide(
+                      color: selected ? Palette.cyan : Palette.hairline,
+                    ),
+                  );
+                }).toList(),
               ),
 
               Gap.lg,

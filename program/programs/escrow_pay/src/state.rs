@@ -35,6 +35,11 @@ pub struct EscrowAccount {
     pub state: EscrowState,
     /// Unix timestamp of `initialize_escrow`.
     pub created_at: i64,
+    /// After this, the buyer can no longer refund and the seller may claim.
+    ///
+    /// This is what stops inaction being a weapon: without it a buyer who
+    /// simply never confirms leaves the seller's money stuck forever.
+    pub deadline: i64,
     /// Distinguishes repeat trades between the same two wallets.
     pub nonce: u64,
     /// Cached PDA bump so the program can sign without re-deriving.
@@ -43,6 +48,30 @@ pub struct EscrowAccount {
 
 impl EscrowAccount {
     pub const SEED_PREFIX: &'static [u8] = b"escrow";
+
+    /// Bounds on the refund window, enforced onchain.
+    ///
+    /// The seller writes the timeout into the QR code, so without a floor a
+    /// hostile seller could set one second and claim the funds before the
+    /// buyer has walked away with the goods — which would make the escrow
+    /// worse than useless. The buyer is guaranteed at least this long to
+    /// dispute, whatever the QR says.
+    #[cfg(not(feature = "test-timeouts"))]
+    pub const MIN_TIMEOUT_SECONDS: i64 = 60 * 60; // 1 hour
+
+    /// Lowered so the integration tests can watch a deadline actually pass —
+    /// `solana-test-validator` cannot warp its clock, and waiting an hour per
+    /// assertion is not a test suite.
+    ///
+    /// NEVER build a deployment with this feature. `anchor build` does not
+    /// enable it, and `devnet-smoke.js` asserts the deployed program still
+    /// rejects a one-second timeout, so a slip is caught before anyone trades
+    /// against it.
+    #[cfg(feature = "test-timeouts")]
+    pub const MIN_TIMEOUT_SECONDS: i64 = 1;
+
+    /// And a ceiling, so funds cannot be parked indefinitely.
+    pub const MAX_TIMEOUT_SECONDS: i64 = 60 * 60 * 24 * 30; // 30 days
 
     /// Anchor's account discriminator.
     pub const DISCRIMINATOR_LEN: usize = 8;
@@ -57,6 +86,7 @@ impl EscrowAccount {
         + 8  // amount
         + 1  // state
         + 8  // created_at
+        + 8  // deadline
         + 8  // nonce
         + 1; // bump
 
@@ -78,6 +108,7 @@ mod tests {
             amount: u64::MAX,
             state: EscrowState::Refunded,
             created_at: i64::MIN,
+            deadline: i64::MAX,
             nonce: u64::MAX,
             bump: 255,
         };
@@ -86,6 +117,15 @@ mod tests {
         account.serialize(&mut encoded).unwrap();
 
         assert_eq!(encoded.len(), EscrowAccount::BODY_LEN);
-        assert_eq!(EscrowAccount::LEN, 98);
+        assert_eq!(EscrowAccount::LEN, 106);
+    }
+
+    /// Guards the production floor. If `test-timeouts` ever leaks into a
+    /// normal build, this fails rather than shipping a one-second escrow.
+    #[test]
+    #[cfg(not(feature = "test-timeouts"))]
+    fn refund_window_floor_is_one_hour() {
+        assert_eq!(EscrowAccount::MIN_TIMEOUT_SECONDS, 3600);
+        assert_eq!(EscrowAccount::MAX_TIMEOUT_SECONDS, 2_592_000);
     }
 }

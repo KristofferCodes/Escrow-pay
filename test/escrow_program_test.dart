@@ -19,6 +19,7 @@ void main() {
       'deposit': [242, 35, 198, 137, 82, 225, 242, 182],
       'confirm_receipt': [203, 36, 80, 115, 249, 12, 141, 170],
       'refund': [2, 96, 183, 251, 63, 208, 46, 46],
+      'claim': [62, 198, 214, 193, 213, 159, 108, 210],
     };
 
     expected.forEach((instruction, bytes) {
@@ -36,13 +37,26 @@ void main() {
         seller: seller,
         nonce: 1,
         lamports: 500000000,
+        timeoutSeconds: 86400,
       ).data!;
 
-      expect(data.length, 8 + 8 + 8);
+      expect(data.length, 8 + 8 + 8 + 8);
 
       final view = ByteData.sublistView(data);
       expect(view.getUint64(8, Endian.little), 1);
       expect(view.getUint64(16, Endian.little), 500000000);
+      expect(view.getInt64(24, Endian.little), 86400);
+    });
+
+    test('claim carries only a discriminator and pays the seller', () {
+      final claim = EscrowProgram.claim(escrow: escrow, seller: seller);
+      expect(claim.data, hasLength(8));
+
+      // The seller signs and is paid; the buyer is not referenced at all.
+      expect(claim.accounts![0].role, AccountRole.writable);
+      expect(claim.accounts![1].address, seller);
+      expect(claim.accounts![1].role, AccountRole.writableSigner);
+      expect(claim.accounts!.map((a) => a.address), isNot(contains(buyer)));
     });
 
     test('the other three carry only a discriminator', () {
@@ -73,6 +87,7 @@ void main() {
         seller: seller,
         nonce: 1,
         lamports: 1,
+        timeoutSeconds: 86400,
       ).accounts!;
 
       expect(accounts[0].role, AccountRole.writable); // escrow PDA
