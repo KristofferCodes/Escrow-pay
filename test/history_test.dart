@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:escrow_pay/core/escrow.dart';
 import 'package:escrow_pay/solana/history_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +20,7 @@ void main() {
     state: state,
     createdAt: DateTime.utc(2026, 9, 30),
     deadline: DateTime.now().add(const Duration(hours: 24)),
+    releaseHash: Uint8List(32),
     nonce: 1,
     bump: 254,
   );
@@ -50,7 +53,7 @@ void main() {
 
       expect(sellerOffset, 8);
       expect(buyerOffset, 40);
-      expect(Escrow.encodedLength, 106);
+      expect(Escrow.encodedLength, 138);
     });
   });
 }

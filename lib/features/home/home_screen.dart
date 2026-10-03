@@ -12,6 +12,7 @@ import '../../widgets/circuit_backdrop.dart';
 import '../../widgets/glass_panel.dart';
 import '../create_listing/create_listing_screen.dart';
 import '../history/history_screen.dart';
+import '../scan/release_scan_screen.dart';
 import '../scan/scan_screen.dart';
 
 /// The fork in the road: sell or buy.
@@ -87,6 +88,16 @@ class HomeScreen extends ConsumerWidget {
                   onTap: () =>
                       Navigator.of(context).push(_fade(const ScanScreen())),
                 ).animate(delay: 300.ms).fadeIn().slideY(begin: 0.12),
+                Gap.md,
+                _RoleCard(
+                  eyebrow: 'HANDING OVER',
+                  title: 'Scan release code',
+                  blurb: 'Get paid the moment the buyer shows their code.',
+                  icon: Icons.qr_code_scanner_rounded,
+                  onTap: () => Navigator.of(
+                    context,
+                  ).push(_fade(const ReleaseScanScreen())),
+                ).animate(delay: 380.ms).fadeIn().slideY(begin: 0.12),
 
                 Gap.lg,
                 _WalletStrip(wallet: wallet),

@@ -21,6 +21,9 @@ test-timeouts = []
 
 [dependencies]
 anchor-lang = "1.2.0"
+# Anchor 1.2 does not re-export hashing through its solana_program module.
+# On SBF this lowers to the sol_sha256 syscall rather than a software hash.
+solana-sha256-hasher = "3.1.0"
 
 # Anchor's derive and attribute macros expand to `cfg(feature = "...")` checks
 # for features that live in anchor-lang, not here. Rust reports each as an

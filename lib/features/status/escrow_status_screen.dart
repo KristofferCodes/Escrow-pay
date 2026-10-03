@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/escrow.dart';
 import '../../core/money.dart';
+import '../../core/release_code.dart';
+import '../../solana/cluster.dart';
 import '../../solana/escrow_controller.dart';
 import '../../solana/wallet_controller.dart';
 import '../../theme/app_theme.dart';
@@ -18,6 +20,7 @@ import '../../widgets/glass_panel.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/shimmer_block.dart';
 import '../../widgets/status_ring.dart';
+import 'release_code_sheet.dart';
 
 /// Where the money is, and what the buyer can do about it.
 ///
@@ -410,6 +413,24 @@ class _Actions extends StatelessWidget {
 
     return Column(
       children: [
+        // Preferred path when this device holds the secret: the seller scans
+        // at handover, so payment and goods move together.
+        if (view.canShowReleaseCode) ...[
+          GradientButton(
+            label: 'Show release code',
+            icon: Icons.qr_code_2_rounded,
+            onPressed: view.busy ? null : () => _showReleaseCode(context, view),
+          ),
+          Gap.md,
+          Text(
+            'Let the seller scan this when you hand over. Or confirm below '
+            'if you would rather release it yourself.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          Gap.md,
+        ],
+
         GradientButton(
           label: 'Confirm receipt & release',
           icon: Icons.check_circle_outline_rounded,
@@ -434,6 +455,36 @@ class _Actions extends StatelessWidget {
         ),
       ],
     ).animate().fadeIn();
+  }
+
+  /// Gated behind an explicit confirmation: the code's whole value is being
+  /// shown *after* inspection, and a buyer who flashes it on arrival has
+  /// given up the protection they paid for.
+  Future<void> _showReleaseCode(BuildContext context, EscrowView view) async {
+    final escrow = view.escrow;
+    final code = view.releaseCode;
+    if (escrow == null || code == null) return;
+
+    if (!await confirmInspected(context)) return;
+    if (!context.mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Palette.surfaceRaised,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => ReleaseCodeSheet(
+        payload: ReleasePayload(
+          escrow: escrow.address,
+          code: code,
+          cluster: Cluster.active.id,
+        ),
+        amount: escrow.amount,
+        seller: escrow.seller,
+      ),
+    );
   }
 
   /// Refunding is not destructive, but it does end the trade — worth one tap

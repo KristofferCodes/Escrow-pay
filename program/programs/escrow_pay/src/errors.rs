@@ -18,4 +18,8 @@ pub enum EscrowError {
     RefundWindowClosed,
     #[msg("The refund window is still open; the buyer may still refund")]
     DeadlineNotReached,
+    #[msg("Release code does not match the one the buyer set")]
+    BadReleaseCode,
+    #[msg("This escrow was opened without a release code")]
+    NoReleaseCode,
 }

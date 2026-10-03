@@ -36,6 +36,7 @@ pub mod escrow_pay {
         nonce: u64,
         amount: u64,
         timeout_seconds: i64,
+        release_hash: [u8; 32],
     ) -> Result<()> {
         require!(amount > 0, EscrowError::ZeroAmount);
         require!(
@@ -59,6 +60,7 @@ pub mod escrow_pay {
         escrow.deadline = now
             .checked_add(timeout_seconds)
             .ok_or(EscrowError::TimeoutOutOfRange)?;
+        escrow.release_hash = release_hash;
         escrow.nonce = nonce;
         escrow.bump = ctx.bumps.escrow;
 
@@ -163,6 +165,58 @@ pub mod escrow_pay {
         emit!(EscrowRefunded {
             escrow: ctx.accounts.escrow.key(),
             buyer: ctx.accounts.escrow.buyer,
+            amount,
+        });
+        Ok(())
+    }
+
+    /// Releases the escrow by presenting the buyer's secret.
+    ///
+    /// The buyer generates 32 random bytes when funding and keeps them on
+    /// their device; only the hash goes onchain. Showing the secret — as a QR
+    /// at handover — is what pays the seller, so the money moves at the same
+    /// moment the goods do.
+    ///
+    /// **Anyone may submit this.** The payout destination is pinned to the
+    /// recorded seller by `has_one`, so holding the secret buys no power to
+    /// redirect funds, only to trigger a payment that was always going to
+    /// that one address. That is what lets a courier scan the code later
+    /// without being trusted with anything.
+    ///
+    /// **Allowed after the deadline too.** Past it the seller can already
+    /// `claim`, and both paths pay the same address, so refusing would add no
+    /// protection — it would only break a late delivery.
+    pub fn release_with_code(ctx: Context<ReleaseWithCode>, secret: [u8; 32]) -> Result<()> {
+        require!(
+            ctx.accounts.escrow.state == EscrowState::Funded,
+            EscrowError::InvalidState
+        );
+
+        // An unset hash would otherwise be releasable by anyone who guessed
+        // the preimage of all zeroes, which is not a guess.
+        require!(
+            ctx.accounts.escrow.release_hash != EscrowAccount::NO_RELEASE_CODE,
+            EscrowError::NoReleaseCode
+        );
+
+        let presented = solana_sha256_hasher::hash(&secret);
+        require!(
+            presented.to_bytes() == ctx.accounts.escrow.release_hash,
+            EscrowError::BadReleaseCode
+        );
+
+        let amount = ctx.accounts.escrow.amount;
+        pay_out(
+            &ctx.accounts.escrow.to_account_info(),
+            &ctx.accounts.seller,
+            amount,
+        )?;
+
+        ctx.accounts.escrow.state = EscrowState::Released;
+
+        emit!(EscrowReleased {
+            escrow: ctx.accounts.escrow.key(),
+            seller: ctx.accounts.escrow.seller,
             amount,
         });
         Ok(())
@@ -296,6 +350,34 @@ pub struct ConfirmReceipt<'info> {
     /// initialization, so the funds can only go where the buyer agreed.
     #[account(mut)]
     pub seller: UncheckedAccount<'info>,
+}
+
+/// Submitted by whoever scanned the buyer's code — today the seller, later a
+/// courier. Deliberately has no signer tied to either party.
+#[derive(Accounts)]
+pub struct ReleaseWithCode<'info> {
+    #[account(
+        mut,
+        has_one = seller,
+        seeds = [
+            EscrowAccount::SEED_PREFIX,
+            seller.key().as_ref(),
+            escrow.buyer.as_ref(),
+            &escrow.nonce.to_le_bytes(),
+        ],
+        bump = escrow.bump,
+    )]
+    pub escrow: Account<'info, EscrowAccount>,
+
+    /// CHECK: pinned by `has_one = seller` to the key recorded at
+    /// initialization. This is the whole security model for the code: the
+    /// secret authorises a payment, never a destination.
+    #[account(mut)]
+    pub seller: UncheckedAccount<'info>,
+
+    /// Pays the fee. Any account — the point is that holding the code is
+    /// enough, and no particular identity is required.
+    pub payer: Signer<'info>,
 }
 
 /// The seller's one and only instruction.

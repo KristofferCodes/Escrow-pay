@@ -54,6 +54,7 @@ abstract final class EscrowProgram {
     required int nonce,
     required int lamports,
     required int timeoutSeconds,
+    required Uint8List releaseHash,
   }) => Instruction(
     programAddress: programId,
     accounts: [
@@ -67,6 +68,8 @@ abstract final class EscrowProgram {
       _u64(nonce),
       _u64(lamports),
       _i64(timeoutSeconds),
+      // Fixed 32 bytes, so no length prefix.
+      releaseHash,
     ]),
   );
 
@@ -97,6 +100,26 @@ abstract final class EscrowProgram {
       AccountMeta(address: seller, role: AccountRole.writable),
     ],
     data: discriminator('confirm_receipt'),
+  );
+
+  /// Releases to the seller by presenting the buyer's secret.
+  ///
+  /// [payer] only covers the fee — it has no authority here. The payout is
+  /// pinned to the recorded seller by the program, which is what lets a
+  /// courier submit this without being trusted.
+  static Instruction releaseWithCode({
+    required Address escrow,
+    required Address seller,
+    required Address payer,
+    required Uint8List secret,
+  }) => Instruction(
+    programAddress: programId,
+    accounts: [
+      AccountMeta(address: escrow, role: AccountRole.writable),
+      AccountMeta(address: seller, role: AccountRole.writable),
+      AccountMeta(address: payer, role: AccountRole.writableSigner),
+    ],
+    data: _concat([discriminator('release_with_code'), secret]),
   );
 
   /// Seller takes the funds once the refund window has closed. The only

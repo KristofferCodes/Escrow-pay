@@ -7,6 +7,7 @@ import {
   SystemProgram,
 } from "@solana/web3.js";
 import { assert, expect } from "chai";
+import { createHash, randomBytes } from "crypto";
 import { EscrowPay } from "../target/types/escrow_pay";
 
 /**
@@ -80,6 +81,15 @@ describe("escrow_pay", () => {
     )[0];
   }
 
+  /// Mirrors what the buyer's phone does: keep 32 random bytes, publish only
+  /// the hash.
+  function newReleaseCode() {
+    const secret = randomBytes(32);
+    return { secret, hash: createHash("sha256").update(secret).digest() };
+  }
+
+  const NO_CODE = Buffer.alloc(32);
+
   let nonceCounter = 0;
   const nextNonce = () => new BN(++nonceCounter);
 
@@ -87,13 +97,14 @@ describe("escrow_pay", () => {
   async function openFunded(
     seller: PublicKey,
     buyer: Keypair,
-    timeout: BN = DAY
+    timeout: BN = DAY,
+    releaseHash: Buffer = NO_CODE
   ) {
     const nonce = nextNonce();
     const escrow = escrowPda(seller, buyer.publicKey, nonce);
 
     await program.methods
-      .initializeEscrow(nonce, AMOUNT, timeout)
+      .initializeEscrow(nonce, AMOUNT, timeout, [...releaseHash])
       .accounts({
         escrow,
         buyer: buyer.publicKey,
@@ -116,6 +127,14 @@ describe("escrow_pay", () => {
     return { escrow, nonce };
   }
 
+  /// Opens a funded escrow that carries a release code, and hands back the
+  /// secret the way the buyer's phone would hold it.
+  async function openWithCode(seller: PublicKey, buyer: Keypair) {
+    const code = newReleaseCode();
+    const { escrow } = await openFunded(seller, buyer, DAY, code.hash);
+    return { escrow, ...code };
+  }
+
   describe("initialize_escrow", () => {
     it("records the terms and starts in Created", async () => {
       const buyer = await fundedKeypair();
@@ -124,7 +143,7 @@ describe("escrow_pay", () => {
       const escrow = escrowPda(seller, buyer.publicKey, nonce);
 
       await program.methods
-        .initializeEscrow(nonce, AMOUNT, DAY)
+        .initializeEscrow(nonce, AMOUNT, DAY, [...NO_CODE])
         .accounts({
           escrow,
           buyer: buyer.publicKey,
@@ -154,7 +173,7 @@ describe("escrow_pay", () => {
 
       try {
         await program.methods
-          .initializeEscrow(nonce, new BN(0), DAY)
+          .initializeEscrow(nonce, new BN(0), DAY, [...NO_CODE])
           .accounts({
             escrow: escrowPda(seller, buyer.publicKey, nonce),
             buyer: buyer.publicKey,
@@ -175,7 +194,7 @@ describe("escrow_pay", () => {
 
       try {
         await program.methods
-          .initializeEscrow(nonce, AMOUNT, DAY)
+          .initializeEscrow(nonce, AMOUNT, DAY, [...NO_CODE])
           .accounts({
             escrow: escrowPda(buyer.publicKey, buyer.publicKey, nonce),
             buyer: buyer.publicKey,
@@ -421,7 +440,7 @@ describe("escrow_pay", () => {
       const nonce = nextNonce();
 
       return program.methods
-        .initializeEscrow(nonce, AMOUNT, timeout)
+        .initializeEscrow(nonce, AMOUNT, timeout, [...NO_CODE])
         .accounts({
           escrow: escrowPda(seller, buyer.publicKey, nonce),
           buyer: buyer.publicKey,
@@ -648,6 +667,292 @@ describe("escrow_pay", () => {
       const after = await connection.getBalance(seller.publicKey);
 
       expect(after - before).to.equal(AMOUNT.toNumber());
+    });
+  });
+
+  describe("release_with_code", () => {
+    it("pays the seller when the correct secret is presented", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow, secret } = await openWithCode(seller.publicKey, buyer);
+
+      const before = await connection.getBalance(seller.publicKey);
+      await program.methods
+        .releaseWithCode([...secret])
+        .accounts({ escrow, seller: seller.publicKey, payer: buyer.publicKey })
+        .signers([buyer])
+        .rpc();
+      const after = await connection.getBalance(seller.publicKey);
+
+      expect(after - before).to.equal(AMOUNT.toNumber());
+
+      const account = await program.account.escrowAccount.fetch(escrow);
+      expect(account.state).to.deep.equal({ released: {} });
+    });
+
+    it("rejects a wrong secret", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow } = await openWithCode(seller.publicKey, buyer);
+
+      try {
+        await program.methods
+          .releaseWithCode([...randomBytes(32)])
+          .accounts({
+            escrow,
+            seller: seller.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected BadReleaseCode");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("BadReleaseCode");
+      }
+    });
+
+    it("rejects an escrow opened without a code", async () => {
+      // An all-zero hash must not be releasable by whoever hashes 32 zeroes.
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow } = await openFunded(seller.publicKey, buyer);
+
+      try {
+        await program.methods
+          .releaseWithCode([...NO_CODE])
+          .accounts({
+            escrow,
+            seller: seller.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected NoReleaseCode");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("NoReleaseCode");
+      }
+    });
+
+    it("rejects release before the escrow is funded", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate().publicKey;
+      const nonce = nextNonce();
+      const escrow = escrowPda(seller, buyer.publicKey, nonce);
+      const code = newReleaseCode();
+
+      // Initialized but never deposited into.
+      await program.methods
+        .initializeEscrow(nonce, AMOUNT, DAY, [...code.hash])
+        .accounts({
+          escrow,
+          buyer: buyer.publicKey,
+          seller,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([buyer])
+        .rpc();
+
+      try {
+        await program.methods
+          .releaseWithCode([...code.secret])
+          .accounts({ escrow, seller, payer: buyer.publicKey })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected InvalidState");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("InvalidState");
+      }
+    });
+
+    it("cannot be released twice", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow, secret } = await openWithCode(seller.publicKey, buyer);
+
+      const release = () =>
+        program.methods
+          .releaseWithCode([...secret])
+          .accounts({
+            escrow,
+            seller: seller.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+
+      await release();
+      try {
+        await release();
+        assert.fail("expected InvalidState");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("InvalidState");
+      }
+    });
+
+    it("is refused once the buyer has refunded", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow, secret } = await openWithCode(seller.publicKey, buyer);
+
+      await program.methods
+        .refund()
+        .accounts({ escrow, buyer: buyer.publicKey })
+        .signers([buyer])
+        .rpc();
+
+      try {
+        await program.methods
+          .releaseWithCode([...secret])
+          .accounts({
+            escrow,
+            seller: seller.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected InvalidState");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("InvalidState");
+      }
+    });
+
+    it("is refused once the seller has claimed", async () => {
+      const buyer = await fundedKeypair();
+      const seller = await fundedKeypair();
+      const code = newReleaseCode();
+      const { escrow } = await openFunded(
+        seller.publicKey,
+        buyer,
+        MIN_TIMEOUT,
+        code.hash
+      );
+
+      const account = await program.account.escrowAccount.fetch(escrow);
+      await warpPast(account.deadline);
+
+      await program.methods
+        .claim()
+        .accounts({ escrow, seller: seller.publicKey })
+        .signers([seller])
+        .rpc();
+
+      try {
+        await program.methods
+          .releaseWithCode([...code.secret])
+          .accounts({
+            escrow,
+            seller: seller.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected InvalidState");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.equal("InvalidState");
+      }
+    });
+
+    it("cannot redirect the payout to another wallet", async () => {
+      // The secret authorises a payment, never a destination.
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const attacker = Keypair.generate();
+      const { escrow, secret } = await openWithCode(seller.publicKey, buyer);
+
+      try {
+        await program.methods
+          .releaseWithCode([...secret])
+          .accounts({
+            escrow,
+            seller: attacker.publicKey,
+            payer: buyer.publicKey,
+          })
+          .signers([buyer])
+          .rpc();
+        assert.fail("expected the seller constraint to reject this");
+      } catch (err) {
+        expect(err.error.errorCode.code).to.be.oneOf([
+          "ConstraintHasOne",
+          "ConstraintSeeds",
+        ]);
+      }
+    });
+
+    it("lets an unrelated third party submit it, and still pays the seller", async () => {
+      // This is what makes a courier handover possible: the scanner needs no
+      // relationship to either party, and gains nothing by scanning.
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const courier = await fundedKeypair();
+      const { escrow, secret } = await openWithCode(seller.publicKey, buyer);
+
+      const sellerBefore = await connection.getBalance(seller.publicKey);
+      const courierBefore = await connection.getBalance(courier.publicKey);
+
+      await program.methods
+        .releaseWithCode([...secret])
+        .accounts({
+          escrow,
+          seller: seller.publicKey,
+          payer: courier.publicKey,
+        })
+        .signers([courier])
+        .rpc();
+
+      const sellerAfter = await connection.getBalance(seller.publicKey);
+      const courierAfter = await connection.getBalance(courier.publicKey);
+
+      expect(sellerAfter - sellerBefore).to.equal(AMOUNT.toNumber());
+      // The security property: scanning earns the courier nothing. (Anchor's
+      // provider wallet pays the fee here, so the courier's balance is
+      // unchanged rather than slightly down.)
+      expect(courierAfter).to.be.at.most(courierBefore);
+    });
+
+    it("still works after the deadline, paying the same address as claim", async () => {
+      // Documented behaviour: past the deadline the seller could claim
+      // anyway, so refusing the code would only break a late delivery.
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const code = newReleaseCode();
+      const { escrow } = await openFunded(
+        seller.publicKey,
+        buyer,
+        MIN_TIMEOUT,
+        code.hash
+      );
+
+      const account = await program.account.escrowAccount.fetch(escrow);
+      await warpPast(account.deadline);
+
+      const before = await connection.getBalance(seller.publicKey);
+      await program.methods
+        .releaseWithCode([...code.secret])
+        .accounts({ escrow, seller: seller.publicKey, payer: buyer.publicKey })
+        .signers([buyer])
+        .rpc();
+      const after = await connection.getBalance(seller.publicKey);
+
+      expect(after - before).to.equal(AMOUNT.toNumber());
+    });
+
+    it("records the hash the buyer set", async () => {
+      const buyer = await fundedKeypair();
+      const seller = Keypair.generate();
+      const { escrow, hash } = await openWithCode(seller.publicKey, buyer);
+
+      const account = await program.account.escrowAccount.fetch(escrow);
+      expect(Buffer.from(account.releaseHash)).to.deep.equal(hash);
+    });
+
+    it("hashes the shared test vector the same way Rust and Dart do", async () => {
+      const secret = Buffer.from(
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "hex"
+      );
+      expect(createHash("sha256").update(secret).digest("hex")).to.equal(
+        "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd"
+      );
     });
   });
 

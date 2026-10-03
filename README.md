@@ -10,23 +10,33 @@ if the buyer backs out first, the program pays the buyer back.
 
 - **Mobile** — Flutter, Android, Solana Mobile Wallet Adapter
 - **Onchain** — Anchor / Rust, four instructions, no backend
-- **Network** — Devnet during development, mainnet for submission
+- **Network** — Devnet
 
 ## How it works
 
 ```
 Seller                    Buyer                     Chain
   |                         |                         |
-  |-- create listing ------>|                         |
-  |   (QR: seller, amount,  |                         |
-  |    nonce, cluster)      |                         |
+  |-- listing QR ---------->|                         |
+  |   (seller, amount,      |   buyer generates a     |
+  |    nonce, timeout)      |   secret, keeps it      |
+  |                         |                         |
   |                         |-- scan + approve ------>| initialize_escrow
-  |                         |                         | deposit
+  |                         |     (sends only         |   (stores sha256)
+  |                         |      the hash)          | deposit
   |                         |                         |   state: Funded
-  |<---- item changes hands-|                         |
-  |                         |-- confirm receipt ----->| confirm_receipt
+  |                         |                         |
+  |------ item offered ---->|   buyer inspects it     |
+  |                         |                         |
+  |<-- release QR ----------|   (secret, escrow)      |
+  |-- scan it -------------------------------------->| release_with_code
   |<==== paid ==============|=========================|   state: Released
+  |                         |                         |
+  |      item handed over once the seller sees "Paid" |
 ```
+
+The buyer can still release by tapping instead — the code is the preferred
+path, not the only one.
 
 If something is wrong, the buyer calls `refund` instead and the funds come
 back — `Funded -> Refunded`. Those four states are the whole lifecycle;
@@ -51,7 +61,7 @@ lib/
   core/        escrow model, lamport maths, QR payload codec
   solana/      program bindings, RPC repository, wallet adapter, controllers
   widgets/     status ring, scan frame, glass panels, particle burst
-  features/    the four screens
+  features/    home, create listing, scan, status, history
   theme/       palette, type scale, ThemeData
 program/
   programs/escrow_pay/src/   the Anchor program
@@ -63,8 +73,16 @@ program/
 PDA seeds — `[b"escrow", seller, buyer, nonce]`
 
 ```rust
-EscrowAccount { seller, buyer, amount, state, created_at, nonce, bump }
+EscrowAccount {
+    seller, buyer, amount, state,
+    created_at, deadline, release_hash, nonce, bump,
+}
 ```
+
+138 bytes, pinned from both sides: `EscrowAccount::LEN` in Rust and
+`Escrow.encodedLength` in Dart, each asserted by a test. The Dart client
+decodes by byte offset rather than parsing the IDL, so the layout is a
+contract between the two codebases.
 
 | Instruction         | Signer | Effect                                        |
 | ------------------- | ------ | --------------------------------------------- |
@@ -73,6 +91,39 @@ EscrowAccount { seller, buyer, amount, state, created_at, nonce, bump }
 | `confirm_receipt`   | buyer  | Pays the seller. `-> Released`                 |
 | `refund`            | buyer  | Pays the buyer back, **before the deadline**. `-> Refunded` |
 | `claim`             | seller | Pays the seller, **after the deadline**. `-> Released` |
+| `release_with_code` | anyone | Pays the seller on presenting the buyer's secret. `-> Released` |
+
+### The release code
+
+The refund window decides a stalemate, but it still leaves a gap at the
+moment that matters: someone has to go first. The seller hands over and hopes
+the buyer confirms, or the buyer confirms and hopes the seller hands over.
+
+The release code closes it. When the buyer funds, their phone generates 32
+random bytes and sends only `sha256(secret)` onchain. At handover — after
+they have inspected the item — the buyer shows the secret as a QR, the seller
+scans it, and `release_with_code` pays out. Money and goods move in the same
+gesture.
+
+Three properties make this safe to hand over:
+
+- **The code authorises a payment, never a destination.** `has_one = seller`
+  pins the payout to the key recorded at funding, so holding the secret buys
+  no ability to redirect anything.
+- **Anyone may submit it.** No signer is tied to either party, which is what
+  lets a courier scan it later without being trusted.
+- **It is allowed after the deadline too.** Past it the seller could `claim`
+  anyway, and both pay the same address — refusing would add no protection
+  and would only break a late delivery.
+
+The seller's screen withholds success until the chain confirms. That is not
+politeness: a submitted-but-unconfirmed release can still lose to a refund
+the buyer sends in the same window, so handing over early is how a seller
+loses both the item and the money.
+
+If the buyer's secret is gone — reinstall, new phone — the option disappears
+and they release by tapping instead. `confirm_receipt`, `refund` and `claim`
+are unchanged.
 
 ### The refund window
 
@@ -196,7 +247,7 @@ retrying those just multiplies the failure. This is safe because the app only
 
 ```bash
 flutter pub get
-flutter test              # pure logic: money, QR codec, account decoding, PDAs
+flutter test              # pure logic + widget tests, no chain needed
 flutter run --dart-define-from-file=config/local.json
 ```
 
@@ -395,6 +446,8 @@ both wrinkles and is what the demo gets recorded on anyway.
 - QR encode/decode, including tampered and cross-cluster codes
 - `EscrowAccount` byte layout, field by field
 - Anchor discriminators, pinned to the bytes Anchor itself emits
+- the release-code hash, pinned to the same vector the Rust test asserts, so
+  the two implementations cannot drift apart
 - PDA derivation, including that swapping buyer and seller changes the address
 
 `node program/scripts/devnet-smoke.js` proves the **deployed** program works,
@@ -406,8 +459,8 @@ surfaces here instead of in someone's hands.
 
 `anchor test --validator legacy -- --features test-timeouts` covers the chain: every state transition, and
 the ways each one can be abused — the seller releasing to themselves, a payout
-redirected to a third wallet, double release, refund after release. 14 tests,
-about 18 seconds.
+redirected to a third wallet, double release, refund after release, every
+timeout bound, and the release-code paths. 37 tests, about a minute.
 
 The `--validator legacy` flag matters. Anchor 1.2 defaults to `surfpool` for
 localnet, which is a separate install; `legacy` uses the `solana-test-validator`
@@ -450,16 +503,14 @@ the file off-chain. That proves the evidence existed at the time it was
 recorded and has not been edited since — which is the part that has to be
 trustworthy. Cheap: one hash per side.
 
-### A release QR for courier deliveries
+### Courier deliveries
 
-In-person trades are the easy case: both parties are present. Courier
-deliveries break the model, because the buyer confirms receipt hours or days
-later and the seller has already lost control of the goods.
-
-A release QR travels with the parcel. Scanning it at handover is what starts
-the inspection clock, so the window begins when the buyer actually has the
-item rather than when they paid. Natural fit for a delivery partner such as
-**Muvvit**, where the courier's scan is the handover event.
+The release code already works for a courier — `release_with_code` takes no
+particular signer, so a delivery agent can submit it without being trusted
+with anything. What is missing is the rest of the flow: the parcel needs the
+code attached, and the inspection clock should start when the buyer actually
+receives the item rather than when they paid. Natural fit for a delivery
+partner such as **Muvvit**, where the courier's scan is the handover event.
 
 ### USDC
 

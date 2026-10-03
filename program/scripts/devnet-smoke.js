@@ -19,12 +19,14 @@ const {
 } = require("@solana/web3.js");
 const fs = require("fs");
 const os = require("os");
+const { createHash, randomBytes } = require("crypto");
 
 const AMOUNT = Math.floor(0.01 * LAMPORTS_PER_SOL);
 
 // The deployed program's floor. Nothing here changes it — the claim path is
 // verified by its refusals, not by waiting an hour for a window to close.
 const HOUR = 60 * 60;
+const NO_CODE = Buffer.alloc(32);
 
 function loadKeypair(path) {
   const secret = JSON.parse(fs.readFileSync(path.replace("~", os.homedir()), "utf8"));
@@ -108,6 +110,10 @@ async function sendAndConfirm(provider, tx, signers = []) {
   const nonce = new anchor.BN(Date.now());
   const failures = [];
 
+  // What the buyer's phone does: keep 32 random bytes, publish only the hash.
+  const secret = randomBytes(32);
+  const releaseHash = createHash("sha256").update(secret).digest();
+
   /// Asserts an instruction is refused with a specific program error.
   async function expectRejected(label, expected, send) {
     try {
@@ -129,7 +135,8 @@ async function sendAndConfirm(provider, tx, signers = []) {
   console.log("program :", program.programId.toBase58());
   console.log("buyer   :", buyer.publicKey.toBase58());
   console.log("seller  :", seller.publicKey.toBase58(), "(fresh, 0 SOL)");
-  console.log("amount  :", AMOUNT / LAMPORTS_PER_SOL, "SOL\n");
+  console.log("amount  :", AMOUNT / LAMPORTS_PER_SOL, "SOL");
+  console.log("code    : sha256(secret) =", releaseHash.toString("hex").slice(0, 16) + "…\n");
 
   // Derived exactly as lib/solana/escrow_program.dart does it.
   const [escrow] = PublicKey.findProgramAddressSync(
@@ -161,7 +168,9 @@ async function sendAndConfirm(provider, tx, signers = []) {
   console.log("timeout bounds");
   await expectRejected("one-second window", "TimeoutOutOfRange", () =>
     program.methods
-      .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(1))
+      .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(1), [
+        ...NO_CODE,
+      ])
       .accounts({
         escrow,
         buyer: buyer.publicKey,
@@ -174,7 +183,9 @@ async function sendAndConfirm(provider, tx, signers = []) {
 
   // 2. open + fund, in one transaction, the way the app does it.
   const fundTx = await program.methods
-    .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(24 * HOUR))
+    .initializeEscrow(nonce, new anchor.BN(AMOUNT), new anchor.BN(24 * HOUR), [
+      ...releaseHash,
+    ])
     .accounts({
       escrow,
       buyer: buyer.publicKey,
@@ -211,24 +222,33 @@ async function sendAndConfirm(provider, tx, signers = []) {
   );
   console.log("");
 
-  // 4. release to the seller.
+  // 4. A wrong secret buys nothing.
+  console.log("release code");
+  await expectRejected("wrong secret", "BadReleaseCode", () =>
+    program.methods
+      .releaseWithCode([...randomBytes(32)])
+      .accounts({ escrow, seller: seller.publicKey, payer: buyer.publicKey })
+      .rpc()
+  );
+
+  // 5. The real one releases — this is the handover scan.
   const before = await connection.getBalance(seller.publicKey);
   const releaseTx = await program.methods
-    .confirmReceipt()
-    .accounts({ escrow, buyer: buyer.publicKey, seller: seller.publicKey })
+    .releaseWithCode([...secret])
+    .accounts({ escrow, seller: seller.publicKey, payer: buyer.publicKey })
     .transaction();
   const sigRelease = await sendAndConfirm(provider, releaseTx);
 
   account = await program.account.escrowAccount.fetch(escrow);
   const after = await connection.getBalance(seller.publicKey);
-  console.log("release :", Object.keys(account.state)[0], "|", sigRelease);
+  console.log("release :", Object.keys(account.state)[0], "| by code |", sigRelease);
 
   if (!("released" in account.state)) throw new Error("expected Released");
   if (after - before !== AMOUNT) {
     throw new Error(`seller received ${after - before}, expected ${AMOUNT}`);
   }
 
-  // 5. A settled escrow is closed to everyone, claim included.
+  // 6. A settled escrow is closed to everyone, claim included.
   console.log("");
   await expectRejected("claim after release", "InvalidState", () =>
     program.methods

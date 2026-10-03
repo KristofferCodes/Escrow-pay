@@ -38,6 +38,9 @@ dependencies:
   permission_handler: ^12.0.3
   # Opens the Play Store when no wallet app is installed.
   url_launcher: ^6.3.2
+  # Holds the buyer's release secrets. Keystore-backed on Android, so the
+  # secret is not readable from a backup or by another app.
+  flutter_secure_storage: ^11.2.0
 
   # Utilities
   crypto: ^3.0.6

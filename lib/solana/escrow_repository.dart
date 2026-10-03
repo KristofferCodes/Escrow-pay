@@ -84,6 +84,7 @@ class EscrowRepository {
   Future<EscrowSubmission> openAndFund({
     required WalletSession session,
     required EscrowOffer offer,
+    required Uint8List releaseHash,
   }) async {
     final seller = Address(offer.seller);
     late Address escrowAddress;
@@ -108,6 +109,7 @@ class EscrowRepository {
               nonce: offer.nonce,
               lamports: offer.lamports,
               timeoutSeconds: offer.timeoutSeconds,
+              releaseHash: releaseHash,
             ),
             EscrowProgram.deposit(escrow: escrow, buyer: buyer),
           ],
@@ -131,6 +133,29 @@ class EscrowRepository {
           escrow: Address(escrow.address),
           buyer: buyer,
           seller: Address(escrow.seller),
+        ),
+      ],
+    ),
+  );
+
+  /// Releases to the seller by presenting the buyer's secret.
+  ///
+  /// Submitted by whoever scanned the code. The connected wallet only pays
+  /// the fee — the program decides the destination.
+  Future<String> releaseWithCode({
+    required WalletSession session,
+    required Escrow escrow,
+    required Uint8List secret,
+  }) => wallet.signAndSend(
+    session: session,
+    buildBase64Transaction: (payer) => _compile(
+      feePayer: payer,
+      instructions: [
+        EscrowProgram.releaseWithCode(
+          escrow: Address(escrow.address),
+          seller: Address(escrow.seller),
+          payer: payer,
+          secret: secret,
         ),
       ],
     ),

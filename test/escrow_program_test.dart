@@ -20,6 +20,7 @@ void main() {
       'confirm_receipt': [203, 36, 80, 115, 249, 12, 141, 170],
       'refund': [2, 96, 183, 251, 63, 208, 46, 46],
       'claim': [62, 198, 214, 193, 213, 159, 108, 210],
+      'release_with_code': [90, 197, 33, 137, 231, 170, 213, 9],
     };
 
     expected.forEach((instruction, bytes) {
@@ -38,9 +39,10 @@ void main() {
         nonce: 1,
         lamports: 500000000,
         timeoutSeconds: 86400,
+        releaseHash: Uint8List(32),
       ).data!;
 
-      expect(data.length, 8 + 8 + 8 + 8);
+      expect(data.length, 8 + 8 + 8 + 8 + 32);
 
       final view = ByteData.sublistView(data);
       expect(view.getUint64(8, Endian.little), 1);
@@ -88,6 +90,7 @@ void main() {
         nonce: 1,
         lamports: 1,
         timeoutSeconds: 86400,
+        releaseHash: Uint8List(32),
       ).accounts!;
 
       expect(accounts[0].role, AccountRole.writable); // escrow PDA

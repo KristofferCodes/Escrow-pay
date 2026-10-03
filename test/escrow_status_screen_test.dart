@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:escrow_pay/core/escrow.dart';
 import 'package:escrow_pay/core/qr_payload.dart';
 import 'package:escrow_pay/features/status/escrow_status_screen.dart';
@@ -63,6 +65,7 @@ void main() {
     state: state,
     createdAt: DateTime.utc(2026, 9, 24, 12),
     deadline: deadline ?? DateTime.now().add(const Duration(hours: 24)),
+    releaseHash: Uint8List(32),
     nonce: 7,
     bump: 254,
   );

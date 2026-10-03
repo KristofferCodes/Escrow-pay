@@ -3,7 +3,9 @@ import 'package:solana_kit/solana_kit.dart';
 
 import '../core/escrow.dart';
 import '../core/qr_payload.dart';
+import '../core/release_code.dart';
 import 'escrow_repository.dart';
+import 'release_code_store.dart';
 import 'wallet.dart';
 import 'wallet_controller.dart';
 
@@ -18,6 +20,8 @@ class EscrowView {
     this.error,
     this.lastSignature,
     this.confirmToken,
+    this.releaseCode,
+    this.showingReleaseCode = false,
   });
 
   /// The PDA, known as soon as the buyer scans — before the account exists.
@@ -42,6 +46,20 @@ class EscrowView {
   /// both play.
   final Object? confirmToken;
 
+  /// The buyer's secret for this escrow, if this device holds it. Null after
+  /// a reinstall or on another phone, which hides the code option rather than
+  /// offering one that cannot work.
+  final ReleaseCode? releaseCode;
+
+  /// Whether the handover QR is currently on screen.
+  final bool showingReleaseCode;
+
+  /// The code is only meaningful while funds are actually held.
+  bool get canShowReleaseCode =>
+      releaseCode != null &&
+      escrow?.state == EscrowState.funded &&
+      (escrow?.hasReleaseCode ?? false);
+
   EscrowState get state => escrow?.state ?? EscrowState.created;
 
   /// Lamports, from the chain when available and from the scanned offer until
@@ -62,6 +80,8 @@ class EscrowView {
     String? error,
     String? lastSignature,
     Object? confirmToken,
+    ReleaseCode? releaseCode,
+    bool? showingReleaseCode,
     bool clearError = false,
   }) => EscrowView(
     address: address ?? this.address,
@@ -72,6 +92,8 @@ class EscrowView {
     error: clearError ? null : (error ?? this.error),
     lastSignature: lastSignature ?? this.lastSignature,
     confirmToken: confirmToken ?? this.confirmToken,
+    releaseCode: releaseCode ?? this.releaseCode,
+    showingReleaseCode: showingReleaseCode ?? this.showingReleaseCode,
   );
 }
 
@@ -126,6 +148,10 @@ class EscrowController extends Notifier<EscrowView> {
     final offer = state.offer;
     if (offer == null || state.busy) return;
 
+    // Generated here, before anything is signed, so the hash that goes
+    // onchain and the secret that stays on this device come from one place.
+    final code = ReleaseCode.generate();
+
     await _run(
       target: EscrowState.funded,
       action: () async {
@@ -135,8 +161,17 @@ class EscrowController extends Notifier<EscrowView> {
         final submission = await _repo.openAndFund(
           session: session,
           offer: offer,
+          releaseHash: code.hash,
         );
         state = state.copyWith(address: submission.escrow);
+
+        // Persist before confirming: if the app dies waiting on the chain,
+        // the escrow still exists and the secret is the only way to release
+        // it by code.
+        await ref
+            .read(releaseCodeStoreProvider)
+            .save(submission.escrow.value, code);
+        state = state.copyWith(releaseCode: code);
 
         final settled = await _repo.awaitState(
           submission.escrow,
@@ -173,6 +208,11 @@ class EscrowController extends Notifier<EscrowView> {
       state = state.copyWith(loading: false, error: _readable(error));
     }
   }
+
+  /// Shown only after the buyer confirms they have inspected the item.
+  void showReleaseCode() => state = state.copyWith(showingReleaseCode: true);
+
+  void hideReleaseCode() => state = state.copyWith(showingReleaseCode: false);
 
   void clear() => state = const EscrowView();
 

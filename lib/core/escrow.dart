@@ -44,16 +44,17 @@ class Escrow {
     required this.state,
     required this.createdAt,
     required this.deadline,
+    required this.releaseHash,
     required this.nonce,
     required this.bump,
   });
 
   /// Byte layout of `EscrowAccount`, after the 8-byte Anchor discriminator:
   /// seller(32) buyer(32) amount(u64) state(u8) created_at(i64)
-  /// deadline(i64) nonce(u64) bump(u8).
+  /// deadline(i64) release_hash(32) nonce(u64) bump(u8).
   static const _discriminatorLength = 8;
   static const encodedLength =
-      _discriminatorLength + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 1;
+      _discriminatorLength + 32 + 32 + 8 + 1 + 8 + 8 + 32 + 8 + 1;
 
   final String address;
   final String seller;
@@ -64,6 +65,12 @@ class Escrow {
 
   /// After this the buyer can no longer refund and the seller can claim.
   final DateTime deadline;
+
+  /// SHA256 of the buyer's release secret, or all zeroes when none was set.
+  final Uint8List releaseHash;
+
+  /// Whether this escrow can be released by presenting a code at all.
+  bool get hasReleaseCode => releaseHash.any((byte) => byte != 0);
 
   final int nonce;
   final int bump;
@@ -109,6 +116,11 @@ class Escrow {
     final deadline = view.getInt64(offset, Endian.little);
     offset += 8;
 
+    final releaseHash = Uint8List.fromList(
+      Uint8List.sublistView(data, offset, offset + 32),
+    );
+    offset += 32;
+
     final nonce = view.getUint64(offset, Endian.little);
     offset += 8;
 
@@ -128,6 +140,7 @@ class Escrow {
         deadline * 1000,
         isUtc: true,
       ).toLocal(),
+      releaseHash: releaseHash,
       nonce: nonce,
       bump: bump,
     );
@@ -141,6 +154,7 @@ class Escrow {
     state: state ?? this.state,
     createdAt: createdAt,
     deadline: deadline,
+    releaseHash: releaseHash,
     nonce: nonce,
     bump: bump,
   );

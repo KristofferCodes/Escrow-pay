@@ -40,6 +40,14 @@ pub struct EscrowAccount {
     /// This is what stops inaction being a weapon: without it a buyer who
     /// simply never confirms leaves the seller's money stuck forever.
     pub deadline: i64,
+    /// SHA256 of a 32-byte secret the buyer generated and kept on their
+    /// device. Whoever presents the preimage can release the escrow — and
+    /// only ever to `seller`, so handing the code over is handing over
+    /// payment, not control.
+    ///
+    /// All zeroes means no code was set, which disables `release_with_code`
+    /// entirely rather than leaving it open to a trivially-found preimage.
+    pub release_hash: [u8; 32],
     /// Distinguishes repeat trades between the same two wallets.
     pub nonce: u64,
     /// Cached PDA bump so the program can sign without re-deriving.
@@ -76,6 +84,9 @@ impl EscrowAccount {
     /// Anchor's account discriminator.
     pub const DISCRIMINATOR_LEN: usize = 8;
 
+    /// A release hash of all zeroes means the buyer set no code.
+    pub const NO_RELEASE_CODE: [u8; 32] = [0u8; 32];
+
     /// Serialized body, spelled out rather than derived.
     ///
     /// The Dart client decodes these bytes by offset instead of parsing an IDL
@@ -87,6 +98,7 @@ impl EscrowAccount {
         + 1  // state
         + 8  // created_at
         + 8  // deadline
+        + 32 // release_hash
         + 8  // nonce
         + 1; // bump
 
@@ -109,6 +121,7 @@ mod tests {
             state: EscrowState::Refunded,
             created_at: i64::MIN,
             deadline: i64::MAX,
+            release_hash: [0xAB; 32],
             nonce: u64::MAX,
             bump: 255,
         };
@@ -117,7 +130,34 @@ mod tests {
         account.serialize(&mut encoded).unwrap();
 
         assert_eq!(encoded.len(), EscrowAccount::BODY_LEN);
-        assert_eq!(EscrowAccount::LEN, 106);
+        assert_eq!(EscrowAccount::LEN, 138);
+    }
+
+    /// Pins the hash the release code depends on to a fixed vector.
+    ///
+    /// The buyer's phone computes this hash in Dart and the program checks it
+    /// in Rust. If the two ever disagree — a different digest, a different
+    /// byte order — every release code silently stops working. The matching
+    /// Dart test in `test/release_code_test.dart` asserts the same pair.
+    #[test]
+    fn sha256_matches_the_shared_test_vector() {
+        let secret: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let digest = solana_sha256_hasher::hash(&secret);
+
+        assert_eq!(
+            hex_lower(&digest.to_bytes()),
+            "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+        );
+
+        let all_ab = [0xABu8; 32];
+        assert_eq!(
+            hex_lower(&solana_sha256_hasher::hash(&all_ab).to_bytes()),
+            "9a2db2e23f1504cd056606553ac049c5e718e8f9ce9233876df1a7a1821af885",
+        );
+    }
+
+    fn hex_lower(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
     /// Guards the production floor. If `test-timeouts` ever leaks into a
