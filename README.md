@@ -423,6 +423,31 @@ confirm the inspection prompt, and scan it from the other phone's **Scan
 release code**. Wait for "Paid" before pretending to hand anything over —
 that wait is the behaviour worth testing.
 
+### Testing the code path with only one phone
+
+The sheet has a **Copy link** button, and `redeem-release.js` does from a
+laptop what the seller's phone does with its camera. So one Android device is
+still enough: the device plays buyer, you play seller.
+
+```bash
+# on the phone: Show release code -> Copy link -> send it to yourself
+cd program
+node scripts/redeem-release.js 'escrowpay:release:v1?e=...&k=...&c=devnet'
+```
+
+Quote the link — the shell will otherwise eat the `&`.
+
+It prints the seller, amount and state before doing anything, refuses an
+escrow that is not funded, and tells you when you have pasted a listing code
+by mistake. It pays the fee with whatever keypair the Solana CLI is
+configured with, which also demonstrates the point of the design: the
+submitter needs no relationship to either party, and the money still goes to
+the seller recorded at funding.
+
+What this does *not* cover is the seller's own UI — the scanner, the
+"Waiting for confirmation" hold, the burst on confirm. Those need a second
+phone.
+
 ### 5. Check the chain agrees
 
 ```bash

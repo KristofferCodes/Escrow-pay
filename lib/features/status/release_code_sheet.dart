@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -108,11 +109,63 @@ class ReleaseCodeSheet extends StatelessWidget {
               ],
             ),
             Gap.md,
+            _CopyLink(payload: payload),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Hide'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Escape hatch for when scanning will not cooperate — bad light, a cracked
+/// screen, a camera that will not focus — and the way to drive a handover
+/// when only one phone is in the room.
+///
+/// This does put a payment-authorising secret on the clipboard, which other
+/// apps can read on older Android. The exposure is narrow because the sheet
+/// only appears after the buyer has confirmed they inspected the item and
+/// are happy to pay: at that point an early release costs them the refund
+/// option they were about to give up anyway. Worth the trade for a path that
+/// still works when the camera does not.
+class _CopyLink extends StatefulWidget {
+  const _CopyLink({required this.payload});
+
+  final ReleasePayload payload;
+
+  @override
+  State<_CopyLink> createState() => _CopyLinkState();
+}
+
+class _CopyLinkState extends State<_CopyLink> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.payload.encode()));
+    await HapticFeedback.selectionClick();
+    if (!mounted) return;
+
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1600));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: _copy,
+      icon: Icon(
+        _copied ? Icons.check_rounded : Icons.copy_rounded,
+        size: 16,
+        color: _copied ? Palette.success : Palette.textSecondary,
+      ),
+      label: Text(
+        _copied ? 'Copied' : "Copy link (if scanning won't work)",
+        style: TextStyle(
+          color: _copied ? Palette.success : Palette.textSecondary,
         ),
       ),
     );
