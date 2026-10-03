@@ -363,12 +363,20 @@ to anyone who installed a build signed with it.
 
 ## Testing the escrow flow
 
-**One Android device is enough.** The seller side never signs anything — it
-reads a wallet address, puts it in a QR code and stops. Only the buyer
-transacts. So the "seller" can be a throwaway keypair and a QR on your laptop
-screen.
+**One Android device covers the funding flow.** Creating a listing does not
+sign anything — it reads a wallet address, puts it in a QR and stops — so the
+"seller" can be a throwaway keypair and a QR on your laptop screen, and the
+one device plays buyer.
 
-The program does reject `seller == buyer` (`SameParty`), so the two addresses
+That gets you fund, tap-to-release, and refund. **The release-code handover
+needs two screens**, because the buyer's phone shows the QR and the seller's
+phone scans it. Two devices, or one device plus a second person's.
+
+The seller does sign, in two places: `claim` after the deadline, and
+`release_with_code` when scanning the buyer's code. Both are submitted from
+the seller's own wallet.
+
+The program rejects `seller == buyer` (`SameParty`), so the two addresses
 have to differ.
 
 ### 1. A seller to pay
@@ -409,6 +417,11 @@ flutter run          # device connected over USB with debugging on
 
 Scan → confirm the amount → **Fund the escrow** → approve in the wallet. The
 ring moves to Funded. Then **Confirm receipt & release**, and it settles.
+
+For the code path instead, with a second device: tap **Show release code**,
+confirm the inspection prompt, and scan it from the other phone's **Scan
+release code**. Wait for "Paid" before pretending to hand anything over —
+that wait is the behaviour worth testing.
 
 ### 5. Check the chain agrees
 
