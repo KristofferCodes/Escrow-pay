@@ -8,7 +8,6 @@ import 'package:escrow_pay/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:solana_kit/solana_kit.dart';
 
 /// Serves a fixed [EscrowView] so the screen can be rendered in every state
@@ -25,12 +24,6 @@ void main() {
   const seller = 'Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS';
   const buyer = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
   const escrowAddress = Address('11111111111111111111111111111112');
-
-  setUpAll(() {
-    // Tests have no network; without this google_fonts logs a failed fetch for
-    // every style resolved.
-    GoogleFonts.config.allowRuntimeFetching = false;
-  });
 
   setUp(() {
     // The screen is a ListView, which only builds what fits. On the default

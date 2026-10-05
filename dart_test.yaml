@@ -1,0 +1,8 @@
+tags:
+  # Deck screenshots are rendered from the widget tree, not assertions about
+  # it. They are skipped by default so a font or spacing tweak does not fail
+  # the correctness suite; regenerate deliberately:
+  #
+  #   flutter test test/deck --tags deck --update-goldens
+  deck:
+    skip: "screenshots; run with --tags deck --update-goldens"

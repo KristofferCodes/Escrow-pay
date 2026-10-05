@@ -34,82 +34,104 @@ class HomeScreen extends ConsumerWidget {
     return Scaffold(
       body: CircuitBackdrop(
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              // Scrolls only when it has to; on a tall phone the layout is
+              // unchanged. Before this a third action card overflowed the
+              // bottom on anything shorter.
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 32,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _Mark(),
-                    const Spacer(),
-                    _ListingsButton(
+                    Row(
+                      children: [
+                        // Expanded, not Flexible beside a Spacer: a Spacer is
+                        // itself an Expanded, so it claimed every spare pixel
+                        // and truncated the wordmark to "Escro…".
+                        const Expanded(child: _Mark()),
+                        _ListingsButton(
+                          onTap: () => Navigator.of(
+                            context,
+                          ).push(_fade(const ListingsScreen())),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(
+                            context,
+                          ).push(_fade(const HistoryScreen())),
+                          icon: const Icon(
+                            Icons.receipt_long_outlined,
+                            size: 19,
+                          ),
+                          color: Palette.textSecondary,
+                          tooltip: 'Your trades',
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(8),
+                        ),
+                        Gap.sm,
+                        _ClusterBadge(label: cluster.label),
+                      ],
+                    ),
+                    Gap.xl,
+
+                    Text('ESCROW PAY', style: text.labelSmall),
+                    Gap.sm,
+                    Text(
+                          'Trade with\nstrangers safely.',
+                          style: text.displaySmall,
+                        )
+                        .animate()
+                        .fadeIn(duration: 500.ms)
+                        .slideY(begin: 0.16, curve: Curves.easeOutCubic),
+                    Gap.md,
+                    Text(
+                      'Funds sit in a program-controlled account until the buyer '
+                      'confirms the goods arrived. No middleman holds them — not '
+                      'even us.',
+                      style: text.bodyLarge,
+                    ).animate(delay: 120.ms).fadeIn(duration: 450.ms),
+
+                    Gap.xl,
+                    Gap.lg,
+
+                    _RoleCard(
+                      eyebrow: 'SELLING',
+                      title: 'Create a listing',
+                      blurb: 'Set a price and show the buyer a QR code.',
+                      icon: Icons.qr_code_2_rounded,
                       onTap: () => Navigator.of(
                         context,
-                      ).push(_fade(const ListingsScreen())),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.of(
+                      ).push(_fade(const CreateListingScreen())),
+                    ).animate(delay: 200.ms).fadeIn().slideY(begin: 0.12),
+                    Gap.md,
+                    _RoleCard(
+                      eyebrow: 'BUYING',
+                      title: 'Scan to pay',
+                      blurb: "Scan the seller's code and fund the escrow.",
+                      icon: Icons.center_focus_strong_rounded,
+                      onTap: () =>
+                          Navigator.of(context).push(_fade(const ScanScreen())),
+                    ).animate(delay: 300.ms).fadeIn().slideY(begin: 0.12),
+                    Gap.md,
+                    _RoleCard(
+                      eyebrow: 'HANDING OVER',
+                      title: 'Scan release code',
+                      blurb: 'Get paid the moment the buyer shows their code.',
+                      icon: Icons.qr_code_scanner_rounded,
+                      onTap: () => Navigator.of(
                         context,
-                      ).push(_fade(const HistoryScreen())),
-                      icon: const Icon(Icons.receipt_long_outlined, size: 19),
-                      color: Palette.textSecondary,
-                      tooltip: 'Your trades',
-                    ),
-                    Gap.xs,
-                    _ClusterBadge(label: cluster.label),
+                      ).push(_fade(const ReleaseScanScreen())),
+                    ).animate(delay: 380.ms).fadeIn().slideY(begin: 0.12),
+
+                    Gap.lg,
+                    _WalletStrip(wallet: wallet),
                   ],
                 ),
-                const Spacer(),
-
-                Text('ESCROW PAY', style: text.labelSmall),
-                Gap.sm,
-                Text('Trade with\nstrangers safely.', style: text.displaySmall)
-                    .animate()
-                    .fadeIn(duration: 500.ms)
-                    .slideY(begin: 0.16, curve: Curves.easeOutCubic),
-                Gap.md,
-                Text(
-                  'Funds sit in a program-controlled account until the buyer '
-                  'confirms the goods arrived. No middleman holds them — not '
-                  'even us.',
-                  style: text.bodyLarge,
-                ).animate(delay: 120.ms).fadeIn(duration: 450.ms),
-
-                const Spacer(flex: 2),
-
-                _RoleCard(
-                  eyebrow: 'SELLING',
-                  title: 'Create a listing',
-                  blurb: 'Set a price and show the buyer a QR code.',
-                  icon: Icons.qr_code_2_rounded,
-                  onTap: () => Navigator.of(
-                    context,
-                  ).push(_fade(const CreateListingScreen())),
-                ).animate(delay: 200.ms).fadeIn().slideY(begin: 0.12),
-                Gap.md,
-                _RoleCard(
-                  eyebrow: 'BUYING',
-                  title: 'Scan to pay',
-                  blurb: "Scan the seller's code and fund the escrow.",
-                  icon: Icons.center_focus_strong_rounded,
-                  onTap: () =>
-                      Navigator.of(context).push(_fade(const ScanScreen())),
-                ).animate(delay: 300.ms).fadeIn().slideY(begin: 0.12),
-                Gap.md,
-                _RoleCard(
-                  eyebrow: 'HANDING OVER',
-                  title: 'Scan release code',
-                  blurb: 'Get paid the moment the buyer shows their code.',
-                  icon: Icons.qr_code_scanner_rounded,
-                  onTap: () => Navigator.of(
-                    context,
-                  ).push(_fade(const ReleaseScanScreen())),
-                ).animate(delay: 380.ms).fadeIn().slideY(begin: 0.12),
-
-                Gap.lg,
-                _WalletStrip(wallet: wallet),
-              ],
+              ),
             ),
           ),
         ),
@@ -142,8 +164,14 @@ class _Mark extends StatelessWidget {
       children: [
         // The app's own monogram, not a stock padlock.
         const EscrowMark(size: 26),
-        Gap.md,
-        Text('Escrow Pay', style: Theme.of(context).textTheme.titleMedium),
+        Gap.sm,
+        Flexible(
+          child: Text(
+            'Escrow Pay',
+            style: Theme.of(context).textTheme.titleMedium,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }

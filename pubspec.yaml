@@ -26,7 +26,6 @@ dependencies:
 
   # Motion & type
   flutter_animate: ^4.5.2
-  google_fonts: ^8.2.1
 
   # Platform
   # Camera permission can be requested and re-requested in-app rather than
@@ -63,3 +62,24 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Bundled rather than fetched by google_fonts at runtime. Downloading type
+  # on first launch means a user with no connection sees fallback faces, and
+  # it made the app's own screens impossible to render in tests.
+  fonts:
+    - family: Space Grotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/SpaceGrotesk-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/SpaceGrotesk-Bold.ttf
+          weight: 700
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
