@@ -52,3 +52,6 @@ ios/Runner.xcodeproj/xcuserdata/
 ios/Podfile.lock
 *.ipa
 .seller-test.json
+
+# Golden-test diff output, regenerated on every mismatch
+**/failures/
