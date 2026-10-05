@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/money.dart';
 import '../../core/qr_payload.dart';
@@ -10,6 +12,7 @@ import '../../theme/typography.dart';
 import '../../widgets/address_chip.dart';
 import '../../widgets/circuit_backdrop.dart';
 import '../../widgets/glass_panel.dart';
+import '../../widgets/gradient_button.dart';
 
 /// The code the buyer scans.
 ///
@@ -132,6 +135,9 @@ class OfferQrScreen extends StatelessWidget {
               ).animate(delay: 220.ms).fadeIn().slideY(begin: 0.08),
 
               Gap.lg,
+              _ShareRow(offer: offer),
+
+              Gap.lg,
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -154,6 +160,83 @@ class OfferQrScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Ways to get the offer to a buyer who is not standing in front of you, or
+/// whose camera will not cooperate.
+///
+/// The link is the same string the QR encodes, so a buyer who cannot scan can
+/// still be handed the identical offer. Both lead to the same escrow — the
+/// QR is a convenience, not the protocol.
+class _ShareRow extends StatefulWidget {
+  const _ShareRow({required this.offer});
+
+  final EscrowOffer offer;
+
+  @override
+  State<_ShareRow> createState() => _ShareRowState();
+}
+
+class _ShareRowState extends State<_ShareRow> {
+  bool _copied = false;
+
+  Future<void> _share() async {
+    final offer = widget.offer;
+    await SharePlus.instance.share(
+      ShareParams(
+        subject: 'Escrow Pay — ${offer.item}',
+        text:
+            'Pay ${Money.sol(offer.lamports)} for "${offer.item}" through '
+            'Escrow Pay.\n\n'
+            'Open this in Escrow Pay, or scan the code:\n'
+            '${offer.encode()}',
+      ),
+    );
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.offer.encode()));
+    await HapticFeedback.selectionClick();
+    if (!mounted) return;
+
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1600));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: GradientButton(
+                label: 'Share listing',
+                icon: Icons.ios_share_rounded,
+                onPressed: _share,
+              ),
+            ),
+          ],
+        ),
+        Gap.sm,
+        TextButton.icon(
+          onPressed: _copy,
+          icon: Icon(
+            _copied ? Icons.check_rounded : Icons.link_rounded,
+            size: 16,
+            color: _copied ? Palette.success : Palette.textSecondary,
+          ),
+          label: Text(
+            _copied ? 'Link copied' : "Copy link (if they can't scan)",
+            style: TextStyle(
+              color: _copied ? Palette.success : Palette.textSecondary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

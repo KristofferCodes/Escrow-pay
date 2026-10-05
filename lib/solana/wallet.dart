@@ -55,11 +55,15 @@ class WalletService {
   /// that a wallet which never comes back surfaces as an error.
   static const _handoffTimeout = Duration(seconds: 25);
 
-  static final _identity = AppIdentity(
-    name: 'Escrow Pay',
-    uri: Uri.parse('https://escrowpay.app'),
-    icon: 'favicon.ico',
-  );
+  /// Name only, deliberately.
+  ///
+  /// Passing `uri` and a relative `icon` asks the wallet to resolve
+  /// `<uri>/<icon>` to verify the app. escrowpay.app is a domain we do not
+  /// own, so that fetch fails and Solflare answers
+  /// `authorization request failed` with nothing shown to the user. The
+  /// plugin's own README passes a bare name for the same reason. Add these
+  /// back only alongside a real domain serving Digital Asset Links.
+  static const _identity = AppIdentity(name: 'Escrow Pay');
 
   bool get isSupported => isMwaSupported();
 
@@ -88,10 +92,7 @@ class WalletService {
     return _guard(() async {
       return transact(
         (wallet) async {
-          final auth = await wallet.reauthorize(
-            authToken: session.authToken,
-            identity: _identity,
-          );
+          final auth = await _authorizeForSigning(wallet, session);
           final signer = _addressOf(auth);
 
           final payload = await buildBase64Transaction(signer);
@@ -111,6 +112,38 @@ class WalletService {
       );
     });
   }
+
+  /// Gets an authorization usable for signing, recovering if the stored
+  /// token is no longer accepted.
+  ///
+  /// A token can be rejected for reasons the app cannot see — the wallet
+  /// cleared its approved apps, the user switched accounts, the wallet was
+  /// reinstalled. Reauthorizing then fails and, without this, the whole
+  /// transaction dead-ends on an error the user can do nothing about.
+  /// Asking fresh costs one approval tap and always works.
+  Future<AuthorizationResult> _authorizeForSigning(
+    KitMobileWallet wallet,
+    WalletSession session,
+  ) async {
+    try {
+      return await wallet.reauthorize(
+        authToken: session.authToken,
+        identity: _identity,
+      );
+    } on Object {
+      final fresh = await wallet.authorize(
+        identity: _identity,
+        chain: cluster.chain,
+      );
+      // Hand the new token back so the next signature does not have to
+      // repeat this.
+      onSessionRefreshed?.call(_toSession(fresh));
+      return fresh;
+    }
+  }
+
+  /// Set by the wallet controller so a re-issued token updates app state.
+  void Function(WalletSession session)? onSessionRefreshed;
 
   /// Revokes this app's authorization in the wallet.
   Future<void> disconnect(WalletSession session) async {

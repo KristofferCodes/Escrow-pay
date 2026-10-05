@@ -61,7 +61,14 @@ class WalletState {
 /// stored somewhere encrypted.
 class WalletController extends Notifier<WalletState> {
   @override
-  WalletState build() => const WalletState();
+  WalletState build() {
+    // A token re-issued mid-signing has to reach app state, or every later
+    // signature repeats the approval sheet.
+    ref.read(walletServiceProvider).onSessionRefreshed = (session) {
+      state = state.copyWith(session: session, clearError: true);
+    };
+    return const WalletState();
+  }
 
   WalletService get _wallet => ref.read(walletServiceProvider);
 

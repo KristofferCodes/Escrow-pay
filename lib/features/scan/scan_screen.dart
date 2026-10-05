@@ -109,6 +109,55 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     }
   }
 
+  /// Accepts an offer that arrived as a link rather than a code.
+  ///
+  /// A QR is only a transport. Someone sent a listing over chat, or the
+  /// camera will not focus — pasting the same string has to work, or the
+  /// share button leads nowhere.
+  Future<void> _pasteLink() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final raw = data?.text?.trim();
+
+    if (raw == null || raw.isEmpty) {
+      setState(() => _rejection = 'Nothing on the clipboard to paste.');
+      return;
+    }
+
+    // Shared links usually arrive wrapped in a sentence, so find the offer
+    // inside rather than demanding the clipboard hold nothing else.
+    final match = RegExp(r'escrowpay:v1\?[^\s]+').firstMatch(raw);
+    final offer = EscrowOffer.decode(match?.group(0) ?? raw);
+
+    if (offer == null) {
+      setState(
+        () =>
+            _rejection = 'That does not look like an Escrow Pay listing link.',
+      );
+      return;
+    }
+
+    final cluster = ref.read(clusterProvider);
+    if (offer.cluster != cluster.id) {
+      setState(
+        () => _rejection =
+            'That link is for ${offer.cluster}. The app is on ${cluster.id}.',
+      );
+      return;
+    }
+
+    _handled = true;
+    await _controller.stop();
+    if (!mounted) return;
+
+    if (!await _ensureWallet()) return;
+    if (!mounted) return;
+
+    unawaited(ref.read(escrowControllerProvider.notifier).adopt(offer));
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const EscrowStatusScreen()),
+    );
+  }
+
   /// Returns true once a wallet is attached. Prompts for one if needed —
   /// scanning a code is a clear enough signal of intent that making the user
   /// find a separate Connect button first is just friction.
@@ -143,6 +192,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       appBar: AppBar(
         title: const Text('Scan to pay'),
         actions: [
+          IconButton(
+            onPressed: _connecting ? null : _pasteLink,
+            icon: const Icon(Icons.content_paste_rounded),
+            tooltip: 'Paste a listing link',
+          ),
           IconButton(
             onPressed: _controller.toggleTorch,
             icon: const Icon(Icons.flashlight_on_outlined),

@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/palette.dart';
 import '../../theme/typography.dart';
 import '../../widgets/circuit_backdrop.dart';
+import '../../widgets/escrow_mark.dart';
 import '../../widgets/glass_panel.dart';
 import '../create_listing/create_listing_screen.dart';
 import '../history/history_screen.dart';
@@ -132,16 +133,9 @@ class _Mark extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            gradient: Palette.accent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: const Icon(Icons.lock_rounded, size: 16, color: Colors.white),
-        ),
-        Gap.sm,
+        // The app's own monogram, not a stock padlock.
+        const EscrowMark(size: 26),
+        Gap.md,
         Text('Escrow Pay', style: Theme.of(context).textTheme.titleMedium),
       ],
     );
