@@ -437,7 +437,7 @@ def closing(c: canvas.Canvas) -> None:
     c.setFont(DISPLAY, 15)
     c.setFillColor(MUTED)
     c.drawCentredString(
-        W / 2, 150, "Kris  ·  Speak Technology Ltd  ·  Lagos, Nigeria"
+        W / 2, 150, "Kris"
     )
     c.showPage()
 
@@ -448,7 +448,7 @@ def main() -> None:
 
     c = canvas.Canvas(str(OUT), pagesize=PAGE)
     c.setTitle("Escrow Pay")
-    c.setAuthor("Kris, Speak Technology Ltd")
+    c.setAuthor("Kris")
     c.setSubject("Onchain escrow for in-person resale — CLOCK IN hackathon")
 
     for slide in (cover, problem, how, guarantees, built, honest, closing):
