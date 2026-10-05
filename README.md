@@ -1,16 +1,79 @@
 # Escrow Pay
 
-Mobile-first onchain escrow for in-person resale, built for **CLOCK IN**, the
-Solana Mobile hackathon by RadiantsDAO.
+**Buy and sell with strangers, face to face, without either side going first.**
 
-A seller and a buyer settle a trade without trusting each other. The buyer's
-funds sit in a program-derived account that neither party controls. When the
-goods change hands the buyer confirms receipt and the program pays the seller;
-if the buyer backs out first, the program pays the buyer back.
+The seller shows a QR code. The buyer scans it and funds an escrow — a
+program-derived account that neither party can touch. At handover the buyer
+shows a release code, the seller scans it, and the payment settles on the
+spot. Money and goods move in the same gesture.
 
-- **Mobile** — Flutter, Android, Solana Mobile Wallet Adapter
-- **Onchain** — Anchor / Rust, four instructions, no backend
-- **Network** — Devnet
+Built for **CLOCK IN**, the Solana Mobile hackathon by RadiantsDAO.
+
+| | |
+| --- | --- |
+| **Platform** | Android (Flutter) — Mobile Wallet Adapter is Android-only |
+| **Onchain** | Anchor / Rust, six instructions, no backend |
+| **Network** | Solana devnet |
+| **Program** | [`5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC`](https://explorer.solana.com/address/5pY9AH8qYE6u17MYknPeoy9HufpguEAt9Lj1vnoXqzNC?cluster=devnet) |
+
+---
+
+## Try it on a phone
+
+Download the APK from [**Releases**](../../releases/latest) and install it.
+
+You need four things, and **all four matter** — miss one and the app fails in
+ways that look like bugs:
+
+1. An Android phone, API 23 or newer
+2. A Solana wallet app — [Solflare](https://play.google.com/store/apps/details?id=com.solflare.mobile)
+   or Phantom
+3. **That wallet switched to devnet.** Both default to mainnet. This is the
+   one people miss.
+4. A little devnet SOL in it — the buyer pays, so the buyer's wallet needs
+   funds. Get some from [faucet.solana.com](https://faucet.solana.com).
+
+### Walking the flow
+
+The full handover needs **two phones**, because one phone cannot scan its own
+screen. One person sells, the other buys.
+
+| | Seller | Buyer |
+| --- | --- | --- |
+| 1 | **Create a listing** → item, price, refund window | |
+| 2 | Show the QR | **Scan to pay** → review → **Fund the escrow** |
+| 3 | Watch **Your listings** turn to *Paid* | Inspect the item |
+| 4 | | **Show release code** |
+| 5 | **Scan release code** → wait for *Paid* | |
+| 6 | Hand over the item | |
+
+**Sellers: do not hand over until the screen says *Paid*.** Until the chain
+confirms, the buyer could still refund.
+
+With only one phone you can still test everything except the handover scan —
+see [Testing the escrow flow](#testing-the-escrow-flow).
+
+---
+
+## Run it from source
+
+```bash
+git clone https://github.com/KristofferCodes/Escrow-pay.git
+cd Escrow-pay
+flutter pub get
+flutter run          # Android device with USB debugging on
+```
+
+That is the whole setup. The program is already deployed to devnet, and with
+no RPC key configured the app falls back to the public endpoint, so a fresh
+clone runs as-is. For a private endpoint and the onchain program, see
+[Getting set up](#getting-set-up).
+
+```bash
+flutter test                                   # 105 app tests
+cd program && anchor test --validator legacy -- --features test-timeouts
+                                               # 37 onchain tests
+```
 
 ## How it works
 
@@ -571,3 +634,10 @@ escrow PDA and SPL transfer variants of the three payout paths.
 Explicitly out of scope for v1: multi-item listings, ratings, in-app chat,
 dispute arbitration beyond the buyer-triggered refund, and any offchain
 backend.
+
+## Licence
+
+Apache 2.0 — see [LICENSE](LICENSE). Chosen to match the ecosystem this is
+built on: `anchor-lang` and the Solana crates are Apache-2.0, and the licence
+carries an express patent grant, which matters more for a payments mechanism
+than it would for a UI library.
