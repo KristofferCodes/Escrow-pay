@@ -106,10 +106,12 @@ class OfferQrScreen extends StatelessWidget {
                       ),
                     ),
                     const Divider(height: 18),
+                    // The chip already shows the address and the copy
+                    // affordance; passing `value` too printed it twice on
+                    // the same line.
                     DetailRow(
                       label: 'Paid to',
-                      value: Money.shortAddress(offer.seller, edge: 6),
-                      valueStyle: AppType.mono(size: 13),
+                      value: '',
                       trailing: AddressChip(address: offer.seller),
                     ),
                     const Divider(height: 18),

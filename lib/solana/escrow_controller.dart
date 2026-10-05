@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:solana_kit/solana_kit.dart';
 
@@ -104,8 +106,61 @@ class EscrowView {
 /// that matters — `signAndSendTransactions` returns as soon as the wallet has
 /// submitted, which is well before the state the user is waiting to see.
 class EscrowController extends Notifier<EscrowView> {
+  Timer? _poll;
+
   @override
-  EscrowView build() => const EscrowView();
+  EscrowView build() {
+    ref.onDispose(() => _poll?.cancel());
+    return const EscrowView();
+  }
+
+  /// Re-reads the escrow on a timer while it can still change.
+  ///
+  /// Waiting on a counterparty and having to find a refresh button is the
+  /// wrong way round — the screen should notice. Fifteen seconds is well
+  /// inside human patience at a handover and costs one small RPC read; the
+  /// timer stops the moment the escrow settles, so a finished trade is not
+  /// polled forever.
+  void _schedulePolling() {
+    _poll?.cancel();
+
+    final address = state.address;
+    if (address == null || state.state.isSettled) return;
+
+    _poll = Timer.periodic(const Duration(seconds: 15), (timer) async {
+      // A wallet round trip is already going to update us, and polling
+      // through it risks showing a stale state over a fresh one.
+      if (state.busy) return;
+
+      final current = state.address;
+      if (current == null || state.state.isSettled) {
+        timer.cancel();
+        return;
+      }
+
+      try {
+        final escrow = await _repo.fetch(current);
+        if (escrow == null) return;
+
+        final settled = escrow.state != state.escrow?.state;
+        state = state.copyWith(escrow: escrow);
+
+        // Reaching a terminal state is worth the same celebration as doing
+        // it by hand, and there is nothing left to poll for.
+        if (escrow.state.isSettled) {
+          if (settled) {
+            state = state.copyWith(
+              confirmToken: DateTime.now().microsecondsSinceEpoch,
+            );
+          }
+          timer.cancel();
+        }
+      } on Object {
+        // A failed poll is not worth surfacing; the next one may work, and
+        // the user still has pull to refresh.
+      }
+    });
+  }
 
   EscrowRepository get _repo => ref.read(escrowRepositoryProvider);
   WalletController get _wallet => ref.read(walletControllerProvider.notifier);
@@ -172,6 +227,7 @@ class EscrowController extends Notifier<EscrowView> {
             .read(releaseCodeStoreProvider)
             .save(submission.escrow.value, code);
         state = state.copyWith(releaseCode: code);
+        _schedulePolling();
 
         final settled = await _repo.awaitState(
           submission.escrow,
@@ -214,7 +270,10 @@ class EscrowController extends Notifier<EscrowView> {
 
   void hideReleaseCode() => state = state.copyWith(showingReleaseCode: false);
 
-  void clear() => state = const EscrowView();
+  void clear() {
+    _poll?.cancel();
+    state = const EscrowView();
+  }
 
   void clearError() => state = state.copyWith(clearError: true);
 

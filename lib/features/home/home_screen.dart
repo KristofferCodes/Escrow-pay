@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/money.dart';
+import '../../solana/listings_controller.dart';
 import '../../solana/wallet_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/palette.dart';
@@ -13,6 +14,7 @@ import '../../widgets/escrow_mark.dart';
 import '../../widgets/glass_panel.dart';
 import '../create_listing/create_listing_screen.dart';
 import '../history/history_screen.dart';
+import '../listings/listings_screen.dart';
 import '../scan/release_scan_screen.dart';
 import '../scan/scan_screen.dart';
 
@@ -41,6 +43,11 @@ class HomeScreen extends ConsumerWidget {
                   children: [
                     const _Mark(),
                     const Spacer(),
+                    _ListingsButton(
+                      onTap: () => Navigator.of(
+                        context,
+                      ).push(_fade(const ListingsScreen())),
+                    ),
                     IconButton(
                       onPressed: () => Navigator.of(
                         context,
@@ -401,5 +408,64 @@ class _WalletProblem extends StatelessWidget {
         ],
       ),
     ).animate().fadeIn(duration: 220.ms).slideY(begin: -0.1);
+  }
+}
+
+/// Listings entry point, badged when a buyer has funded something the seller
+/// has not collected — the signal that previously required opening the app
+/// and hunting for a refresh button.
+class _ListingsButton extends ConsumerWidget {
+  const _ListingsButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final waiting = ref.watch(
+      listingsControllerProvider.select((s) => s.awaitingCollection),
+    );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          onPressed: onTap,
+          icon: const Icon(Icons.sell_outlined, size: 19),
+          color: Palette.textSecondary,
+          tooltip: 'Your listings',
+        ),
+        if (waiting > 0)
+          Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Palette.cyan,
+                    borderRadius: Radii.chip,
+                  ),
+                  child: Text(
+                    '$waiting',
+                    style: const TextStyle(
+                      color: Palette.void_,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              )
+              .animate(onPlay: (c) => c.repeat(reverse: true))
+              .fadeIn()
+              .scaleXY(
+                begin: 0.9,
+                end: 1.08,
+                duration: 900.ms,
+                curve: Curves.easeInOut,
+              ),
+      ],
+    );
   }
 }

@@ -23,5 +23,5 @@ void main() {
   // tall frame, and rotating mid-scan is a good way to lose the demo.
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  runApp(const ProviderScope(child: EscrowPayApp()));
+  runApp(ProviderScope(child: EscrowPayApp()));
 }

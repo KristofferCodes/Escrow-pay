@@ -4,7 +4,9 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/money.dart';
+import '../../core/listing.dart';
 import '../../core/qr_payload.dart';
+import '../../solana/listings_controller.dart';
 import '../../solana/wallet_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/palette.dart';
@@ -65,6 +67,13 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
       cluster: ref.read(clusterProvider).id,
       timeoutSeconds: _timeoutSeconds,
     );
+
+    // Persist before showing it. A QR the seller cannot get back to is
+    // worse than useless: the nonce is baked into the code a buyer may
+    // already be holding, so regenerating would orphan it.
+    await ref
+        .read(listingsControllerProvider.notifier)
+        .save(Listing(offer: offer, createdAt: DateTime.now()));
 
     await HapticFeedback.mediumImpact();
     if (!mounted) return;

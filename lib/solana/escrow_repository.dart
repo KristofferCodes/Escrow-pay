@@ -213,6 +213,15 @@ class EscrowRepository {
     return all;
   }
 
+  /// Every escrow where this wallet is the seller.
+  ///
+  /// A seller cannot derive the PDA for their own listing: the seeds include
+  /// the buyer's key, which is unknown until someone scans. So the only way
+  /// to find out whether a listing was paid is to ask the chain for escrows
+  /// naming this seller and match the nonce from the QR.
+  Future<List<Escrow>> escrowsForSeller(Address seller) =>
+      _accountsWhere(offset: _sellerOffset, equals: seller);
+
   /// Field offsets inside `EscrowAccount`, after the 8-byte discriminator.
   /// Mirrors the layout in `Escrow.decode` and `EscrowAccount::BODY_LEN`.
   static const _sellerOffset = 8;
