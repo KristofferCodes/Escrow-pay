@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/qr_payload.dart';
@@ -38,6 +39,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 
   /// Bumped to force a fresh MobileScanner after a permission change.
   int _cameraAttempt = 0;
+
+  /// Set while the wallet handoff is in flight, so the scanner shows what is
+  /// happening instead of appearing to freeze on a stopped camera.
+  bool _connecting = false;
 
   @override
   void dispose() {
@@ -89,6 +94,13 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       await _controller.stop();
       if (!mounted) return;
 
+      // Connect before leaving this screen. Doing it after navigating meant
+      // the wallet handoff raced the route change, and a failure landed the
+      // user on a status screen with nothing to act on — it read as the app
+      // cutting out. Here, a failure keeps them on the scanner with a retry.
+      if (!await _ensureWallet()) return;
+      if (!mounted) return;
+
       unawaited(ref.read(escrowControllerProvider.notifier).adopt(offer));
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const EscrowStatusScreen()),
@@ -97,9 +109,34 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     }
   }
 
+  /// Returns true once a wallet is attached. Prompts for one if needed —
+  /// scanning a code is a clear enough signal of intent that making the user
+  /// find a separate Connect button first is just friction.
+  Future<bool> _ensureWallet() async {
+    final wallet = ref.read(walletControllerProvider);
+    if (wallet.isConnected) return true;
+
+    setState(() => _connecting = true);
+    final session = await ref.read(walletControllerProvider.notifier).connect();
+    if (!mounted) return false;
+
+    setState(() => _connecting = false);
+    if (session != null) return true;
+
+    // Failed or dismissed: let them try again rather than stranding them.
+    setState(() => _handled = false);
+    try {
+      await _controller.start();
+    } on Object {
+      // Re-renders through errorBuilder if the camera will not restart.
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final wallet = ref.watch(walletControllerProvider);
 
     return Scaffold(
       backgroundColor: Palette.void_,
@@ -134,7 +171,19 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
             bottom: 48,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 260),
-              child: _rejection == null
+              child: _connecting
+                  ? const _ScanNotice(
+                      key: ValueKey('connecting'),
+                      tint: Palette.cyan,
+                      message: 'Opening your wallet…',
+                    )
+                  : wallet.error != null
+                  ? _WalletTrouble(
+                      key: const ValueKey('wallet'),
+                      message: wallet.error!,
+                      noWallet: wallet.noWalletInstalled,
+                    )
+                  : _rejection == null
                   ? Text(
                       key: const ValueKey('hint'),
                       'Point at the seller’s code. You will confirm the '
@@ -181,6 +230,109 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 /// again if the user has not permanently denied it, so this asks directly
 /// first and falls back to opening settings only when Android will no longer
 /// prompt.
+/// A short status line over the camera view.
+class _ScanNotice extends StatelessWidget {
+  const _ScanNotice({required this.message, required this.tint, super.key});
+
+  final String message;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: Radii.control,
+        color: tint.withValues(alpha: 0.14),
+        border: Border.all(color: tint.withValues(alpha: 0.42)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(tint),
+            ),
+          ),
+          Gap.md,
+          Flexible(
+            child: Text(message, style: TextStyle(color: tint, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown when the wallet handoff failed, right where the user is — with the
+/// one action that helps when nothing can answer the intent.
+class _WalletTrouble extends ConsumerWidget {
+  const _WalletTrouble({
+    required this.message,
+    required this.noWallet,
+    super.key,
+  });
+
+  final String message;
+  final bool noWallet;
+
+  static final _solflare = Uri.parse(
+    'https://play.google.com/store/apps/details?id=com.solflare.mobile',
+  );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: Radii.control,
+        color: Palette.warning.withValues(alpha: 0.14),
+        border: Border.all(color: Palette.warning.withValues(alpha: 0.42)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Palette.warning,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          if (noWallet) ...[
+            Gap.sm,
+            FilledButton.icon(
+              onPressed: () =>
+                  launchUrl(_solflare, mode: LaunchMode.externalApplication),
+              icon: const Icon(Icons.download_rounded, size: 17),
+              label: const Text('Install Solflare'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Palette.warning,
+                foregroundColor: Palette.void_,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ] else ...[
+            Gap.sm,
+            Text(
+              'Point at the code again to retry.',
+              style: TextStyle(
+                color: Palette.warning.withValues(alpha: 0.8),
+                fontSize: 11.5,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _CameraProblem extends ConsumerStatefulWidget {
   const _CameraProblem({required this.error, required this.onRetry});
 

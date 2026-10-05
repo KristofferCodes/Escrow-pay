@@ -8,6 +8,7 @@ import '../../core/money.dart';
 import '../../core/qr_payload.dart';
 import '../../core/release_code.dart';
 import '../../solana/release_scan_controller.dart';
+import '../../solana/wallet_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/palette.dart';
 import '../../theme/typography.dart';
@@ -31,6 +32,7 @@ class _ReleaseScanScreenState extends ConsumerState<ReleaseScanScreen> {
 
   bool _handled = false;
   String? _rejection;
+  bool _connecting = false;
 
   @override
   void dispose() {
@@ -52,6 +54,11 @@ class _ReleaseScanScreenState extends ConsumerState<ReleaseScanScreen> {
         await _controller.stop();
         if (!mounted) return;
 
+        // Same reasoning as the buyer's scanner: scanning is intent enough,
+        // so prompt for a wallet here rather than failing at submit time.
+        if (!await _ensureWallet()) return;
+        if (!mounted) return;
+
         await ref.read(releaseScanControllerProvider.notifier).redeem(payload);
         return;
       }
@@ -67,6 +74,32 @@ class _ReleaseScanScreenState extends ConsumerState<ReleaseScanScreen> {
         setState(() => _rejection = reason);
       }
     }
+  }
+
+  /// Prompts for a wallet if none is attached, and keeps the user on the
+  /// scanner with a readable reason if that fails.
+  Future<bool> _ensureWallet() async {
+    if (ref.read(walletControllerProvider).isConnected) return true;
+
+    setState(() => _connecting = true);
+    final session = await ref.read(walletControllerProvider.notifier).connect();
+    if (!mounted) return false;
+    setState(() => _connecting = false);
+
+    if (session != null) return true;
+
+    setState(() {
+      _handled = false;
+      _rejection =
+          ref.read(walletControllerProvider).error ??
+          'Connect a wallet to collect payment.';
+    });
+    try {
+      await _controller.start();
+    } on Object {
+      // Re-renders through the camera error path.
+    }
+    return false;
   }
 
   Future<void> _scanAgain() async {
@@ -115,7 +148,30 @@ class _ReleaseScanScreenState extends ConsumerState<ReleaseScanScreen> {
                   bottom: 48,
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 260),
-                    child: _rejection == null
+                    child: _connecting
+                        ? Container(
+                            key: const ValueKey('connecting'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: Radii.control,
+                              color: Palette.cyan.withValues(alpha: 0.14),
+                              border: Border.all(
+                                color: Palette.cyan.withValues(alpha: 0.42),
+                              ),
+                            ),
+                            child: const Text(
+                              'Opening your wallet…',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Palette.cyan,
+                                fontSize: 13,
+                              ),
+                            ),
+                          )
+                        : _rejection == null
                         ? Text(
                             key: const ValueKey('hint'),
                             'Ask the buyer to show their release code once '

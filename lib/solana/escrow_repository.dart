@@ -241,9 +241,17 @@ class EscrowRepository {
       response = await _rpc
           .request<List<Object?>>('getProgramAccounts', params)
           .send();
-    } on Object catch (error) {
+    } on Object {
+      // Fall back on *any* failure rather than sniffing the message.
+      //
+      // Alchemy's free tier refuses this method with HTTP 400 and puts the
+      // reason in the JSON body, which the transport never parses — so all
+      // that reaches here is "HTTP error (400): Bad request". Matching on
+      // wording missed it and the whole history screen failed. This is a
+      // read-only query, so retrying it somewhere else costs nothing and
+      // cannot do harm.
       final fallback = _fallbackRpc;
-      if (fallback == null || !_isMethodUnavailable(error)) rethrow;
+      if (fallback == null) rethrow;
 
       response = await fallback
           .request<List<Object?>>('getProgramAccounts', params)
@@ -298,17 +306,6 @@ class EscrowRepository {
       await Future<void>.delayed(interval);
     }
     return last;
-  }
-
-  /// Distinguishes "this provider will not serve the method" from a genuine
-  /// failure. Only the former is worth retrying somewhere else.
-  static bool _isMethodUnavailable(Object error) {
-    final text = error.toString().toLowerCase();
-    return text.contains('not available') ||
-        text.contains('not supported') ||
-        text.contains('unsupported') ||
-        text.contains('method not found') ||
-        text.contains('disabled');
   }
 
   Future<String> _compile({

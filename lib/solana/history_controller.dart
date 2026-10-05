@@ -14,7 +14,13 @@ class HistoryController extends AsyncNotifier<List<Escrow>> {
     final session = ref.watch(walletControllerProvider).session;
     if (session == null) return const [];
 
-    return ref.read(escrowRepositoryProvider).history(session.address);
+    try {
+      return await ref.read(escrowRepositoryProvider).history(session.address);
+    } on Object catch (error) {
+      // Raw solanaError#81000002 text is not something to put in front of
+      // someone. Say what failed and what it means for them.
+      throw HistoryUnavailable.from(error);
+    }
   }
 
   Future<void> refresh() async {
@@ -49,6 +55,47 @@ final historyControllerProvider =
     AsyncNotifierProvider<HistoryController, List<Escrow>>(
       HistoryController.new,
     );
+
+/// Carries a message already fit to show, so the screen does not have to
+/// decide how to phrase a transport failure.
+class HistoryUnavailable implements Exception {
+  const HistoryUnavailable(this.message);
+
+  /// Turns a transport failure into something worth reading.
+  ///
+  /// The case that prompted this: Alchemy's free tier refuses
+  /// `getProgramAccounts` with HTTP 400 and puts the reason in the JSON body,
+  /// which never gets parsed — so all the UI had was
+  /// `solanaError#81000002: HTTP error (400): Bad Request`.
+  factory HistoryUnavailable.from(Object error) {
+    final text = error.toString();
+
+    if (text.contains('400') || text.contains('not available')) {
+      return const HistoryUnavailable(
+        'This RPC endpoint will not serve the query your history needs '
+        '(getProgramAccounts). Your trades are safe onchain — only this '
+        'list is affected.',
+      );
+    }
+    if (text.contains('429')) {
+      return const HistoryUnavailable(
+        'The RPC endpoint is rate limiting us. Pull to refresh in a moment.',
+      );
+    }
+    if (text.contains('SocketException') || text.contains('ClientException')) {
+      return const HistoryUnavailable(
+        'Could not reach the cluster. Check the connection and pull to '
+        'refresh.',
+      );
+    }
+    return HistoryUnavailable(text);
+  }
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 /// What the wallet did in a given escrow. The same account reads differently
 /// depending on which side you were on.
